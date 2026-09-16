@@ -90,3 +90,43 @@ The third print will be a similar model in PC again. This one has 5 connection p
 I plan to glue it with scigrip 16, then coat it in the gorilla clear spray first, then paint the top in plasti-dip clear paint on.  Depending on the grippiness, sand + plasti-dip spray is an option.
 
 
+
+The printer I have now has a 200 x 200 mm bed, and the v4 quadrants need up to a
+226 mm square, so v4 was re-split into 8 pieces instead of 4:
+`toiletv4_sliced_in_8.stl`.
+
+The four original cuts (at X=0 and Z=0, through the middle of each side) are
+untouched. Each quadrant gets one new radial cut through its corner, at 45, 135,
+225 and 315 degrees. Every piece now fits a 164-180 mm square and is 94.7 mm
+tall.
+
+| piece | smallest square bed |
+|---|---|
+| S0 | 169 mm |
+| S1 | 171 mm |
+| S2 | 170 mm |
+| S3 | 164 mm |
+| S4 | 165 mm |
+| S5 | 179 mm |
+| S6 | 180 mm |
+| S7 | 169 mm |
+
+The new joints reuse the v4 connector exactly: 3 round pegs down the skirt
+(5 mm peg into a 6 mm hole, 6 mm long, 7 mm deep) and 2 flat tongues in the top
+flange (4 x 35 mm tongue into a 5 x 36 mm slot), 0.5 mm clearance per side
+throughout. Male and female alternate so every joint has one of each.
+
+One difference worth knowing before printing: the diagonal cuts meet the ~10.5 mm
+skirt obliquely, so the bore drifts slightly across the wall as it goes in and
+the sockets there are left with 1.1-1.8 mm of wall, against 1.5-2.0 mm on the
+original cuts. Still 3+ perimeters, but the skirt pegs on the new corner joints
+are the thinnest-walled feature in the part.
+
+The pieces are exported exploded 40 mm outward, the same way the v4 file is laid
+out. `tools/split8.py` regenerates the file from `toiletv4_sliced.stl` and
+`tools/check8.py` verifies it (watertightness, volume, every connector and its
+clearance, bed fit, and that neighbouring pieces mate without interference).
+Both need `numpy`, `trimesh`, `manifold3d`, `scipy`, `shapely`.
+
+Note the Fusion `.f3d` files were not updated - the 8-way split was done on the
+v4 mesh, so it is STL only.
