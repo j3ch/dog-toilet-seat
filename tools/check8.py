@@ -17,7 +17,11 @@ import trimesh
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import split8 as S
 
-BED = float(sys.argv[1]) if len(sys.argv) > 1 and __name__ == "__main__" else 200.0
+# check8.py [split.stl [assembled.stl [bed_mm]]]
+ARGV = sys.argv[1:] if __name__ == "__main__" else []
+SPLIT = ARGV[0] if len(ARGV) > 0 else None
+WHOLE = ARGV[1] if len(ARGV) > 1 else None
+BED = float(ARGV[2]) if len(ARGV) > 2 else 200.0
 EXISTING_CUTS = (0.0, 90.0, 180.0, 270.0)
 NEW_CUTS = (45.0, 135.0, 225.0, 315.0)
 
@@ -32,7 +36,7 @@ def check(ok, msg):
 
 def load_sectors():
     """The 8 pieces, un-exploded back into assembled position."""
-    mesh = trimesh.load(S.OUT)
+    mesh = trimesh.load(SPLIT or S.OUT)
     mesh.merge_vertices()
     parts = [p for p in mesh.split(only_watertight=False) if p.volume > 1.0]
     for p in parts:
@@ -122,8 +126,13 @@ def classify(poly):
 
 
 def main():
-    quads = S.load_quadrants()
-    v4_volume = sum(q.volume for q in quads)
+    if WHOLE:
+        base = trimesh.load(WHOLE)
+        base_volume = base.volume
+        base_name = WHOLE.rsplit("/", 1)[-1]
+    else:
+        base_volume = sum(q.volume for q in S.load_quadrants())
+        base_name = "v4"
     sectors = load_sectors()
 
     print("\n1. integrity")
@@ -143,11 +152,12 @@ def main():
     sock = 4 * (3 * 0.5 * S.SECTIONS * (S.HOLE_D / 2) ** 2
                 * math.sin(2 * math.pi / S.SECTIONS) * S.HOLE_DEPTH
                 + 2 * S.SLOT_L * S.SLOT_H * S.HOLE_DEPTH)
-    want = v4_volume + peg - sock
+    want = base_volume + peg - sock
     got = sum(p.volume for p in sectors)
-    err = abs(got - want) / v4_volume
+    err = abs(got - want) / base_volume
     check(err < 0.005, f"{got / 1000:.1f} cm3 vs expected {want / 1000:.1f} cm3 "
-                       f"(v4 {v4_volume / 1000:.1f} + pegs - sockets), {err * 100:.3f}% error")
+                       f"({base_name} {base_volume / 1000:.1f} + pegs - sockets), "
+                       f"{err * 100:.3f}% error")
 
     print("\n3. connectors on the 4 new joints")
     for angle in NEW_CUTS:

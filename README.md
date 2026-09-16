@@ -130,3 +130,41 @@ Both need `numpy`, `trimesh`, `manifold3d`, `scipy`, `shapely`.
 
 Note the Fusion `.f3d` files were not updated - the 8-way split was done on the
 v4 mesh, so it is STL only.
+
+## Ridges, rebuilt on v4
+
+The ridged redesign only exists here as Fusion `.f3d` archives, and their
+geometry is an Autodesk ShapeManager BREP (`ASM BinaryFile4tY`) that nothing
+outside Fusion can read - there is no cached mesh in the archive either, so the
+shapes cannot be recovered without the kernel that made them.
+
+`toiletv5_rings.svg` is readable though. It is 64 closed curves, each a uniform
+outward offset of the hole outline, spaced 7.086 px apart, the innermost sitting
+two steps out from the hole. Registering the v4 sketch hole (`toiletcuts_v2.svg`,
+617.74 x 690.63 px) against the v4 model's own hole (219.1 x 242.9 mm) gives
+0.3532 mm/px, which puts that spacing at 2.503 mm - so the pattern was laid out
+on a 2.5 mm offset step.
+
+The v5 hole is a different shape from v4's, so rather than dropping the v5 curves
+onto the wrong outline, `tools/ridges.py` rebuilds the same construction on v4's
+own hole: concentric outward offsets at 2.5 mm, raised on alternating bands.
+Ridges are 2.5 mm wide with 2.5 mm flats between them, stand 1.5 mm proud, and
+start 5 mm out from the hole. They are cut from a lifted copy of the part rather
+than stamped on at a fixed height, so they follow the sloping top face exactly.
+All of that is parameterised at the top of the script.
+
+- `toiletv4_ridged.stl` - the whole seat, 2326.3 cm3, 96.2 mm tall
+- `toiletv4_ridged_in_8.stl` - the same thing in the 8 printable pieces
+
+The joints are untouched: the ridge stock is floored at y=8.6 mm, above the
+8.5 mm flange slots and below the top face, and each piece's stock is clipped to
+its own sector, so no ridge material crosses a cut plane. `tools/check8.py`
+passes on the ridged split - all 8 pieces closed shells, every connector still
+5/6 mm and 4x35 / 5x36 at 0.5 mm clearance, still 164-180 mm square.
+
+Two things this is not. It is v4 with the v5 ridge pattern, not a reproduction of
+the model that was actually printed in PETG - that one also changed the hole
+shape and the centre flange, and those changes are locked in the `.f3d`. And
+`toiletv4_ridged.stl` is built by reassembling the v4 quadrants, so it keeps the
+0.5 mm clearance gap around each of the 20 connectors of the original joints as
+internal voids (3.7 cm3). There is no un-sliced v4 in the repo to build it from.
