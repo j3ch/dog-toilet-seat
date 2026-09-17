@@ -198,8 +198,8 @@ outer ridges touch: 46-293 mm2. Whichever you pick, it needs support or a brim.
 ## Fitting the measured bowl
 
 `measurements.jpg` has the opening measured on the toilet: **335 mm** on the long
-axis and **270 mm** across at the rim, tapering to **315 x 260** about 10 mm
-down. The skirt may go no more than 70 mm into the bowl.
+axis and **270 mm** across at the rim, tapering inward to **315 x 260** over the
+first 60 mm of depth. The skirt may go no more than 70 mm into the bowl.
 
 ### Skirt shortened to 65.4 mm
 
@@ -222,27 +222,26 @@ Overall the seat is now 375 x 427 mm in plan and 81.6 mm tall, pieces
 
 ### Does it drop in?
 
-`skirt_vs_bowl.png` overlays the skirt on the measured opening. Comparing extreme
-dimensions at each depth:
+Yes, with 4.5-9.5 mm a side everywhere. `skirt_vs_bowl.png` overlays the skirt on
+the measured opening. Comparing extreme dimensions at each depth:
 
 | depth | skirt W x L | opening W x L | clearance per side |
 |---|---|---|---|
-| 1 mm | 255.9 x 319.9 | 269.0 x 333.0 | +6.6 / +6.6 |
-| 5 mm | 252.9 x 316.9 | 265.0 x 325.0 | +6.1 / +4.1 |
-| 10 mm | 251.8 x 315.8 | 260.0 x 315.0 | +4.1 / **−0.4** |
-| 20 mm | 249.5 x 313.7 | 260.0 x 315.0 | +5.2 / +0.6 |
-| 65 mm | 240.1 x 304.2 | 260.0 x 315.0 | +9.9 / +5.4 |
+| 1 mm | 255.9 x 319.9 | 269.8 x 334.7 | +7.0 / +7.4 |
+| 10 mm | 251.8 x 315.8 | 268.3 x 331.7 | +8.3 / +7.9 |
+| 20 mm | 249.5 x 313.7 | 266.7 x 328.3 | +8.6 / +7.3 |
+| 40 mm | 245.2 x 309.5 | 263.3 x 321.7 | +9.1 / +6.1 |
+| 60 mm | 241.1 x 305.3 | 260.0 x 315.0 | +9.4 / +4.9 |
+| 65.4 mm | 240.0 x 304.1 | 259.1 x 313.2 | +9.5 / +4.5 |
 
-Everywhere except one spot it clears, by 4-10 mm a side across the width. The
-exception is 0.4 mm per side on the length at 10 mm depth, and that depends
-entirely on an assumption the measurements do not pin down: that the taper to
-315 is complete by 10 mm. If it finishes at 15 mm instead, that point clears by
-about 2.9 mm a side.
+The tightest point is +4.5 mm a side, at the bottom of the skirt on the long
+axis. Nothing interferes at any depth.
 
-Two caveats on all of this. These are extreme dimensions, not shapes - two
-outlines with compatible bounding boxes need not nest. And against a true
-ellipse of the stated axes the skirt is proud by up to 8.6 mm at one end of the
-long axis, because it is squarer there than an ellipse; real bowls are fuller
-than ellipses, which is presumably why the traced shape looks the way it does,
-but a tape measure on two axes cannot confirm that. Tracing the opening on film,
-as the original was, would settle it.
+One caveat, as ever: these are extreme dimensions, not shapes, and two outlines
+with compatible bounding boxes need not nest. Tested against a true ellipse of
+the stated axes the skirt is still slightly proud - 0.2 to 2.6 mm, worst at the
+rim, at one end of the long axis, where the traced shape is squarer than an
+ellipse. Real bowls are fuller than ellipses, which is presumably why it was
+traced that way, and a couple of millimetres is inside the tolerance of a tape
+measure on porcelain. Tracing the opening on film, as the original was, would
+settle it outright.
