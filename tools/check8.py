@@ -99,13 +99,19 @@ def audit_joint(pa, pb, angle, label):
             section_polygons(male, angle, sign * S.PEG_L / 2)]
     holes = [classify(q) for q in
              section_holes(female, angle, sign * S.HOLE_DEPTH / 2)]
-    check(len(pegs) == 5 and sum(k.startswith("circle") for k, _, _ in pegs) == 3,
-          f"{label} {angle:3.0f}: 3 pegs + 2 tongues "
+    np_, nt = (sum(k.startswith("circle") for k, _, _ in pegs),
+               sum(k.startswith("rect") for k, _, _ in pegs))
+    nh, ns = (sum(k.startswith("circle") for k, _, _ in holes),
+              sum(k.startswith("rect") for k, _, _ in holes))
+    # v4's own joints lose their lowest peg to the skirt trim, so the count is
+    # checked against the other side of the joint rather than against a fixed 5.
+    check(len(pegs) == np_ + nt and np_ >= 2 and nt == 2,
+          f"{label} {angle:3.0f}: {np_} pegs + {nt} tongues "
           + str(sorted(k for k, _, _ in pegs)))
-    check(len(holes) == 5 and sum(k.startswith("circle") for k, _, _ in holes) == 3,
-          f"{label} {angle:3.0f}: 3 holes + 2 slots  "
+    check((nh, ns) == (np_, nt),
+          f"{label} {angle:3.0f}: {nh} holes + {ns} slots to match  "
           + str(sorted(k for k, _, _ in holes)))
-    if len(pegs) == 5 and len(holes) == 5:
+    if len(pegs) == len(holes) and pegs:
         worst = min(min(wh - wp, hh - hp) / 2
                     for (_, wp, hp), (_, wh, hh)
                     in zip(sorted(pegs, key=lambda t: t[1]),

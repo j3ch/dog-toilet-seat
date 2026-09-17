@@ -194,3 +194,55 @@ down puts 419-508 mm2 on the bed (the bottom edge of the skirt wall) and then
 cantilevers the flange out 80 mm up, so it wants support. Flipped, the ridged
 face is down but the top surface slopes about 4 mm across the flange, so only the
 outer ridges touch: 46-293 mm2. Whichever you pick, it needs support or a brim.
+
+## Fitting the measured bowl
+
+`measurements.jpg` has the opening measured on the toilet: **335 mm** on the long
+axis and **270 mm** across at the rim, tapering to **315 x 260** about 10 mm
+down. The skirt may go no more than 70 mm into the bowl.
+
+### Skirt shortened to 65.4 mm
+
+v4's skirt is 80 mm. It cannot simply be cut at 70 mm, because the lowest
+connector is not at the same height on every original mating face - the four
+lowest sockets top out at −68.0, −67.0, −67.0 and −65.905 mm - and a cut at −70
+bisects three of them. The deepest cut that leaves every joint feature whole is
+0.5 mm above the highest, so `SKIRT_TRIM_Y = -65.4`, giving a **65.4 mm** skirt.
+That is under the 70 mm limit with room to spare.
+
+The four original joints lose their lowest peg to the trim and now carry 2 pegs
++ 2 tongues. The four new diagonal joints still carry 3 pegs + 2 tongues, placed
+by `split8.py` at whatever heights leave the most wall - it now searches within
+6 mm of each nominal height rather than using fixed ones, because the skirt
+thins and drifts differently around the ring. Wall left around the new sockets is
+1.22-1.69 mm, against v4's own 1.5-2.0 mm.
+
+Overall the seat is now 375 x 427 mm in plan and 81.6 mm tall, pieces
+164-180 mm square and 81.1-81.6 mm tall.
+
+### Does it drop in?
+
+`skirt_vs_bowl.png` overlays the skirt on the measured opening. Comparing extreme
+dimensions at each depth:
+
+| depth | skirt W x L | opening W x L | clearance per side |
+|---|---|---|---|
+| 1 mm | 255.9 x 319.9 | 269.0 x 333.0 | +6.6 / +6.6 |
+| 5 mm | 252.9 x 316.9 | 265.0 x 325.0 | +6.1 / +4.1 |
+| 10 mm | 251.8 x 315.8 | 260.0 x 315.0 | +4.1 / **−0.4** |
+| 20 mm | 249.5 x 313.7 | 260.0 x 315.0 | +5.2 / +0.6 |
+| 65 mm | 240.1 x 304.2 | 260.0 x 315.0 | +9.9 / +5.4 |
+
+Everywhere except one spot it clears, by 4-10 mm a side across the width. The
+exception is 0.4 mm per side on the length at 10 mm depth, and that depends
+entirely on an assumption the measurements do not pin down: that the taper to
+315 is complete by 10 mm. If it finishes at 15 mm instead, that point clears by
+about 2.9 mm a side.
+
+Two caveats on all of this. These are extreme dimensions, not shapes - two
+outlines with compatible bounding boxes need not nest. And against a true
+ellipse of the stated axes the skirt is proud by up to 8.6 mm at one end of the
+long axis, because it is squarer there than an ellipse; real bowls are fuller
+than ellipses, which is presumably why the traced shape looks the way it does,
+but a tape measure on two axes cannot confirm that. Tracing the opening on film,
+as the original was, would settle it.

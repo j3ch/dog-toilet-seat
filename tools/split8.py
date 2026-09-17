@@ -14,6 +14,7 @@ import math
 from pathlib import Path
 
 import numpy as np
+import shapely
 import trimesh
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -27,7 +28,8 @@ HOLE_D, HOLE_DEPTH = 6.0, 7.0    # female socket
 TONGUE_L, TONGUE_H = 35.0, 4.0   # male flange tongue
 SLOT_L, SLOT_H = 36.0, 5.0       # female flange slot
 TONGUE_Y = 6.0                   # tongue mid-height (spans y = 4..8)
-PEG_YS = (-25.0, -47.0, -70.0)   # peg heights down the skirt
+PEG_YS = (-22.0, -45.0, -60.0)   # nominal peg heights, as v4's top two plus one
+PEG_Y_SEARCH = 6.0               # how far a peg may be nudged to find sound wall
 SECTIONS = 24                    # facets per peg, matching v4
 
 # v4's own sockets leave 1.5-2.0 mm of wall.  The diagonal cuts meet the ~10.5 mm
@@ -36,7 +38,16 @@ SECTIONS = 24                    # facets per peg, matching v4
 MIN_WALL = 1.0
 TONGUE_GAP = 13.0                # material between the two tongues, as v4
 BACKING = 2.0                    # male material required behind a peg root
+# Depths the cross-section is taken at, on each side of the cut.
+MALE_PROBES = (-0.1, -1.0, -BACKING)
+FEMALE_PROBES = (0.1, 1.5, 3.0, 4.5, 6.0, 7.0)
 EXPLODE = 40.0                   # radial explode distance for the export
+
+# The bowl this is for takes at most 70 mm of skirt; v4's is 80 mm.  The lowest
+# connector is not at the same height on every original mating face - the four
+# sockets top out at -68.0, -67.0, -67.0 and -65.905 - so the deepest cut that
+# bisects none of them is 0.5 mm above the highest, leaving 65.4 mm of skirt.
+SKIRT_TRIM_Y = -65.4
 
 
 def frame(angle_deg):
@@ -74,35 +85,62 @@ def load_quadrants():
                              -30.0 if cz > 0 else 30.0])
         if not p.is_watertight:
             raise SystemExit("quadrant is not watertight")
+    if SKIRT_TRIM_Y is not None:
+        # Boolean against a box rather than a capped plane slice: the slicer's
+        # cap triangulation leaves hair-thin slivers elsewhere on the part.
+        keep = trimesh.creation.box(
+            extents=[2000.0, 400.0, 2000.0],
+            transform=trimesh.transformations.translation_matrix(
+                [0.0, SKIRT_TRIM_Y + 200.0, 0.0]))
+        parts = [trimesh.boolean.intersection([p, keep], engine=ENGINE) for p in parts]
+        for p in parts:
+            if not p.is_watertight:
+                raise SystemExit("quadrant is not watertight after the skirt trim")
     parts.sort(key=lambda p: math.degrees(math.atan2(p.centroid[2], p.centroid[0])) % 360)
     return parts
 
 
-def spans(mesh, u, v, y, offset, r0=60.0, r1=300.0, step=0.25):
-    """Radial intervals of solid material at height `y`, `offset` off the plane.
+def profile(mesh, angle, offset):
+    """Cross-section of `mesh` at `offset` from the cut plane, in (r, y).
 
-    Never sample at offset 0: points exactly on the cap plane sit on the mesh
-    boundary, where an inside/outside test is ambiguous.
+    Taken as an exact section polygon rather than by sampling `contains`: once
+    the skirt trim adds a cap face, ray casting misclassifies enough points to
+    make the measured wall jump around by several mm between adjacent heights.
     """
-    rs = np.arange(r0, r1, step)
-    hit = mesh.contains(np.outer(rs, u) + y * v + offset)
-    out, start = [], None
-    for i, h in enumerate(hit):
-        if h and start is None:
-            start = rs[i]
-        elif not h and start is not None:
-            out.append((start, rs[i]))
-            start = None
-    if start is not None:
-        out.append((start, rs[-1]))
+    u, v, n = frame(angle)
+    sec = mesh.section(plane_normal=n, plane_origin=n * offset)
+    if sec is None:
+        return None
+    planar, to_3d = sec.to_planar(normal=n)
+
+    def conv(coords):
+        a = np.asarray(coords)
+        w = np.column_stack([a[:, 0], a[:, 1], np.zeros(len(a)), np.ones(len(a))]) @ to_3d.T
+        return np.column_stack([w[:, :3] @ u, w[:, :3] @ v])
+
+    polys = [shapely.Polygon(conv(p.exterior.coords),
+                             [conv(r.coords) for r in p.interiors])
+             for p in planar.polygons_full]
+    return shapely.union_all(polys) if polys else None
+
+
+def spans(region, y):
+    """Radial intervals of material at height `y`."""
+    cut = shapely.LineString([(-1e4, y), (1e4, y)]).intersection(region)
+    out = []
+    for g in getattr(cut, "geoms", [cut]):
+        if g.is_empty or g.geom_type != "LineString":
+            continue
+        xs = [c[0] for c in g.coords]
+        out.append((min(xs), max(xs)))
     return out
 
 
-def common_interval(mesh, u, v, n, y, offsets):
-    """Radial band of material shared by every one of `offsets` along n."""
+def common_interval(regions, y):
+    """Radial band of material shared by every one of these cross-sections."""
     lo, hi = -np.inf, np.inf
-    for off in offsets:
-        cand = spans(mesh, u, v, y, off * n)
+    for region in regions:
+        cand = spans(region, y)
         if not cand:
             return None
         a, b = max(cand, key=lambda sp: sp[1] - sp[0])
@@ -110,15 +148,15 @@ def common_interval(mesh, u, v, n, y, offsets):
     return (lo, hi) if hi > lo else None
 
 
-def centre_range(mesh_low, mesh_high, u, v, n, y, half_male, half_female):
+def centre_range(male, female, y, half_male, half_female):
     """Radial positions where a connector of this width fits both halves.
 
     The male peg has to sit inside the cut face (and a little material behind
     it); the female socket has to stay buried over its whole depth, which is the
-    binding constraint -- the wall curves away from the cut as it runs on.
+    binding constraint - the wall curves away from the cut as it runs on.
     """
-    face = common_interval(mesh_low, u, v, n, y, (-0.1, -BACKING))
-    sock = common_interval(mesh_high, u, v, n, y, (0.1, HOLE_DEPTH / 2, HOLE_DEPTH))
+    face = common_interval(male, y)
+    sock = common_interval(female, y)
     if face is None or sock is None:
         return None
     lo = max(face[0] + half_male, sock[0] + half_female)
@@ -126,25 +164,43 @@ def centre_range(mesh_low, mesh_high, u, v, n, y, half_male, half_female):
     return (lo, hi) if hi >= lo else None
 
 
-def joint_features(mesh_low, mesh_high, angle):
+def footprint(r, y, half_len, half_h, round_):
+    if round_:
+        return shapely.Point(r, y).buffer(half_len, quad_segs=SECTIONS // 2)
+    return shapely.box(r - half_len, y - half_h, r + half_len, y + half_h)
+
+
+def joint_features(male, female, angle):
     """Peg and tongue placements for the new cut at `angle`.
 
     Positions are measured from the material actually present rather than
     hard-coded, so each connector stays centred in its wall.
     """
-    u, v, n = frame(angle)
     feats = []
 
-    for y in PEG_YS:
-        rng = centre_range(mesh_low, mesh_high, u, v, n, y,
-                           PEG_D / 2 + MIN_WALL, HOLE_D / 2 + MIN_WALL)
-        if rng is None:
-            raise SystemExit(f"cut {angle:.0f}: skirt at y={y:.0f} is too thin or "
-                             f"drifts too far to hold a peg with {MIN_WALL} mm wall")
-        lo, hi = rng
-        feats.append(("peg", (lo + hi) / 2.0, y, (hi - lo) / 2.0 + MIN_WALL))
+    for target in PEG_YS:
+        # The wall thins and drifts differently around the ring, so take the
+        # height near the nominal one that leaves the most material.
+        best = None
+        for dy in np.arange(-PEG_Y_SEARCH, PEG_Y_SEARCH + 0.5, 1.0):
+            y = target + dy
+            if y - HOLE_D / 2 < SKIRT_TRIM_Y + 1.0 or y + HOLE_D / 2 > -1.0:
+                continue
+            rng = centre_range(male, female, y,
+                               PEG_D / 2 + MIN_WALL, HOLE_D / 2 + MIN_WALL)
+            if rng is None:
+                continue
+            lo, hi = rng
+            wall = (hi - lo) / 2.0 + MIN_WALL
+            if best is None or wall > best[0]:
+                best = (wall, (lo + hi) / 2.0, y)
+        if best is None:
+            raise SystemExit(f"cut {angle:.0f}: no height within {PEG_Y_SEARCH:.0f} mm "
+                             f"of y={target:.0f} where the skirt can hold a peg with "
+                             f"{MIN_WALL} mm wall")
+        feats.append(("peg", best[1], best[2], best[0]))
 
-    rng = centre_range(mesh_low, mesh_high, u, v, n, TONGUE_Y,
+    rng = centre_range(male, female, TONGUE_Y,
                        TONGUE_L / 2 + MIN_WALL, SLOT_L / 2 + MIN_WALL)
     if rng is None:
         raise SystemExit(f"cut {angle:.0f}: flange cannot hold a tongue")
@@ -163,35 +219,21 @@ def joint_features(mesh_low, mesh_high, angle):
     return feats
 
 
-def check_buried(mesh, u, v, n, r, y, half_len, half_h, depth, label, round_=False):
-    """Assert the body really holds this connector over its whole depth.
-
-    `round_` samples a disc rather than its enclosing rectangle, so the corners
-    a cylinder never occupies do not fail the check.
-    """
-    rr = np.linspace(r - half_len, r + half_len, 9)
-    yy = np.linspace(y - half_h, y + half_h, 9)
-    face = [(a, b) for a in rr for b in yy
-            if not round_ or
-            ((a - r) / half_len) ** 2 + ((b - y) / half_h) ** 2 <= 1.0 + 1e-9]
-    dd = np.linspace(0.2, depth, 6)
-    grid = np.array([a * u + b * v + d * n for a, b in face for d in dd])
-    missing = int((~mesh.contains(grid)).sum())
-    if missing:
-        raise SystemExit(f"{label}: {missing}/{len(grid)} sample points outside the "
-                         "body - connector would break through")
-
-
-def verify_joint(mesh_low, mesh_high, angle, feats):
-    u, v, n = frame(angle)
+def verify_joint(male, female, angle, feats):
+    """Assert every connector is fully buried over its whole depth."""
     for kind, r, y, _ in feats:
         rnd = kind == "peg"
-        hl, hh = ((PEG_D / 2, PEG_D / 2) if rnd else (TONGUE_L / 2, TONGUE_H / 2))
-        check_buried(mesh_low, u, v, -n, r, y, hl, hh, BACKING,
-                     f"cut {angle:.0f} {kind} r={r:.1f} y={y:.0f} (male root)", rnd)
-        hl, hh = ((HOLE_D / 2, HOLE_D / 2) if rnd else (SLOT_L / 2, SLOT_H / 2))
-        check_buried(mesh_high, u, v, n, r, y, hl, hh, HOLE_DEPTH,
-                     f"cut {angle:.0f} {kind} r={r:.1f} y={y:.0f} (female socket)", rnd)
+        peg = footprint(r, y, *((PEG_D / 2, PEG_D / 2) if rnd
+                                else (TONGUE_L / 2, TONGUE_H / 2)), rnd)
+        sock = footprint(r, y, *((HOLE_D / 2, HOLE_D / 2) if rnd
+                                 else (SLOT_L / 2, SLOT_H / 2)), rnd)
+        for region, shape, side in ((male, peg, "male root"),
+                                    (female, sock, "female socket")):
+            for i, cross in enumerate(region):
+                if not cross.contains(shape):
+                    raise SystemExit(
+                        f"cut {angle:.0f} {kind} r={r:.1f} y={y:.0f} ({side}): "
+                        f"breaks through at probe {i}")
 
 
 def connector_solids(angle, feats, male):
@@ -231,8 +273,12 @@ def main():
             if not half.is_watertight:
                 raise SystemExit(f"cut {angle:.0f}: {name} half is not watertight")
 
-        feats = joint_features(low, high, angle)
-        verify_joint(low, high, angle, feats)
+        male = [profile(low, angle, d) for d in MALE_PROBES]
+        female = [profile(high, angle, d) for d in FEMALE_PROBES]
+        if any(x is None for x in male + female):
+            raise SystemExit(f"cut {angle:.0f}: empty cross-section")
+        feats = joint_features(male, female, angle)
+        verify_joint(male, female, angle, feats)
         print(f"cut {angle:5.0f} deg  " + "  ".join(
             f"{k}(r={r:.1f},y={y:.0f},wall>={w:.2f})" for k, r, y, w in feats))
 
