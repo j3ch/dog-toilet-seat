@@ -168,3 +168,29 @@ shape and the centre flange, and those changes are locked in the `.f3d`. And
 `toiletv4_ridged.stl` is built by reassembling the v4 quadrants, so it keeps the
 0.5 mm clearance gap around each of the 20 connectors of the original joints as
 internal voids (3.7 cm3). There is no un-sliced v4 in the repo to build it from.
+
+### One file per piece
+
+`pieces/toiletv4_ridged_S0.stl` ... `_S7.stl` are the 8 ridged pieces as separate
+solids, ready to open in a slicer: converted to Z up, turned about the vertical
+axis to their smallest square footprint, centred on the origin and sitting on
+Z=0. `tools/export_pieces.py` regenerates them, and takes any of the split files
+as an argument.
+
+| piece | footprint mm | tall mm | volume cm3 |
+|---|---|---|---|
+| S0 | 168.6 x 166.9 | 95.8 | 250.9 |
+| S1 | 169.8 x 171.0 | 96.1 | 305.8 |
+| S2 | 170.0 x 170.2 | 96.2 | 307.0 |
+| S3 | 163.7 x 161.9 | 95.8 | 232.1 |
+| S4 | 164.4 x 165.4 | 95.8 | 269.0 |
+| S5 | 179.4 x 178.8 | 95.8 | 342.5 |
+| S6 | 180.4 x 179.1 | 95.7 | 342.9 |
+| S7 | 169.0 x 168.7 | 95.7 | 271.9 |
+
+They are exported the way up the seat is used, skirt down. That is not
+necessarily the way to print them - neither orientation gives a flat base. Skirt
+down puts 419-508 mm2 on the bed (the bottom edge of the skirt wall) and then
+cantilevers the flange out 80 mm up, so it wants support. Flipped, the ridged
+face is down but the top surface slopes about 4 mm across the flange, so only the
+outer ridges touch: 46-293 mm2. Whichever you pick, it needs support or a brim.
