@@ -179,14 +179,14 @@ as an argument.
 
 | piece | footprint mm | tall mm | volume cm3 |
 |---|---|---|---|
-| S0 | 168.6 x 166.9 | 95.8 | 250.9 |
-| S1 | 169.8 x 171.0 | 96.1 | 305.8 |
-| S2 | 170.0 x 170.2 | 96.2 | 307.0 |
-| S3 | 163.7 x 161.9 | 95.8 | 232.1 |
-| S4 | 164.4 x 165.4 | 95.8 | 269.0 |
-| S5 | 179.4 x 178.8 | 95.8 | 342.5 |
-| S6 | 180.4 x 179.1 | 95.7 | 342.9 |
-| S7 | 169.0 x 168.7 | 95.7 | 271.9 |
+| S0 | 166.8 x 168.7 | 79.2 | 237.0 |
+| S1 | 171.0 x 169.6 | 79.6 | 289.7 |
+| S2 | 170.0 x 170.6 | 79.6 | 291.3 |
+| S3 | 162.1 x 163.6 | 79.2 | 219.1 |
+| S4 | 165.5 x 164.6 | 79.3 | 255.2 |
+| S5 | 179.6 x 178.7 | 79.6 | 326.8 |
+| S6 | 179.1 x 180.5 | 79.6 | 327.4 |
+| S7 | 168.7 x 169.1 | 79.3 | 258.0 |
 
 They are exported **turned over**: ridged face down, skirt pointing up. Printed
 the other way up the flange cantilevers 80 mm out above the thin bottom edge of
@@ -195,11 +195,19 @@ support. The turn is a 180 degree rotation, never a mirror - `export_pieces.py`
 asserts the placement matrix has determinant +1, because mirroring would reverse
 every peg and socket. Pass `--upright` for the other orientation.
 
-The ridged face does not quite lie flat: it is within **0.5-1.3 degrees** of
-parallel to the bed, but over a 170 mm piece that is up to 3 mm, and the ridges
-are only 1.5 mm tall, so the low end stands clear. First-layer contact is
-46-376 mm2 of ridge top. Tilting each piece by that degree or so in the slicer
-takes it to roughly 700-5200 mm2. Use a brim either way.
+That face sits about a degree off parallel to the bed, which over a 170 mm piece
+is enough to lift one end clear of the 1.5 mm ridges, so each piece is also
+**levelled**: `export_pieces.py` shortlists the convex hull facets pointing at
+the bed, lays each one flat in turn, and keeps whichever actually puts the most
+material down. Scoring on real contact rather than on how much area faces the
+bed matters - a face can present plenty of area and still meet the bed on one
+edge, which is what left one piece at 1072 mm2 when scored the naive way.
+
+First-layer contact went from 46-376 mm2 of ridge top to **3547-5854 mm2** on
+the eight pieces, levelling each by 1.03 degrees. The quadrants gain less,
+1030-1629 mm2 at 0.49-0.56 degrees, because a 90 degree piece spans more of the
+curve of the seat and no single plane meets as much of it. A brim is still worth
+using. `--no-level` skips this, `--upright` turns the pieces back over.
 
 ## Fitting the measured bowl
 
