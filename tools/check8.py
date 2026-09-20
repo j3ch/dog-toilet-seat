@@ -22,8 +22,9 @@ ARGV = sys.argv[1:] if __name__ == "__main__" else []
 SPLIT = ARGV[0] if len(ARGV) > 0 else None
 WHOLE = ARGV[1] if len(ARGV) > 1 else None
 BED = float(ARGV[2]) if len(ARGV) > 2 else 200.0
-EXISTING_CUTS = (0.0, 90.0, 180.0, 270.0)
-NEW_CUTS = (45.0, 135.0, 225.0, 315.0)
+V4_CUTS = (0.0, 90.0, 180.0, 270.0)     # the planes v4 was already cut on
+PIECES = 8                              # set from the file being checked
+SECTOR = 45.0
 
 fails = []
 
@@ -35,14 +36,17 @@ def check(ok, msg):
 
 
 def load_sectors():
-    """The 8 pieces, un-exploded back into assembled position."""
+    """The pieces, un-exploded back into assembled position."""
+    global PIECES, SECTOR
     mesh = trimesh.load(SPLIT or S.OUT)
     mesh.merge_vertices()
     parts = [p for p in mesh.split(only_watertight=False) if p.volume > 1.0]
+    PIECES = len(parts)
+    SECTOR = 360.0 / PIECES if PIECES else 45.0
     for p in parts:
         a = math.degrees(math.atan2(p.centroid[2], p.centroid[0])) % 360
-        si = int(a // 45)
-        mid = math.radians(si * 45 + 22.5)
+        si = int(a // SECTOR)
+        mid = math.radians(si * SECTOR + SECTOR / 2)
         p.apply_translation([-S.EXPLODE * math.cos(mid), 0.0,
                              -S.EXPLODE * math.sin(mid)])
     parts.sort(key=lambda p: math.degrees(math.atan2(p.centroid[2], p.centroid[0])) % 360)
@@ -140,9 +144,10 @@ def main():
         base_volume = sum(q.volume for q in S.load_quadrants())
         base_name = "v4"
     sectors = load_sectors()
+    new_cuts = tuple(c for c in (i * SECTOR for i in range(PIECES)) if c not in V4_CUTS)
 
     print("\n1. integrity")
-    check(len(sectors) == 8, f"8 separate solids (got {len(sectors)})")
+    check(len(sectors) in (4, 8), f"{len(sectors)} separate solids")
     for i, p in enumerate(sectors):
         check(p.is_watertight and p.is_winding_consistent and p.volume > 0,
               f"S{i} watertight, consistent winding, volume {p.volume / 1000:.1f} cm3")
@@ -152,10 +157,10 @@ def main():
     peg = 4 * (3 * math.pi * (S.PEG_D / 2) ** 2 * S.PEG_L * math.cos(math.pi / S.SECTIONS) ** 0
                 * (S.SECTIONS / (2 * math.pi)) * math.sin(2 * math.pi / S.SECTIONS)
                 + 2 * S.TONGUE_L * S.TONGUE_H * S.PEG_L)
-    peg = 4 * (3 * 0.5 * S.SECTIONS * (S.PEG_D / 2) ** 2
+    peg = len(new_cuts) * (3 * 0.5 * S.SECTIONS * (S.PEG_D / 2) ** 2
                * math.sin(2 * math.pi / S.SECTIONS) * S.PEG_L
                + 2 * S.TONGUE_L * S.TONGUE_H * S.PEG_L)
-    sock = 4 * (3 * 0.5 * S.SECTIONS * (S.HOLE_D / 2) ** 2
+    sock = len(new_cuts) * (3 * 0.5 * S.SECTIONS * (S.HOLE_D / 2) ** 2
                 * math.sin(2 * math.pi / S.SECTIONS) * S.HOLE_DEPTH
                 + 2 * S.SLOT_L * S.SLOT_H * S.HOLE_DEPTH)
     want = base_volume + peg - sock
@@ -165,15 +170,18 @@ def main():
                        f"({base_name} {base_volume / 1000:.1f} + pegs - sockets), "
                        f"{err * 100:.3f}% error")
 
-    print("\n3. connectors on the 4 new joints")
-    for angle in NEW_CUTS:
-        si = int(angle // 45)
-        audit_joint(sectors[si - 1], sectors[si % 8], angle, "new cut")
+    if new_cuts:
+        print(f"\n3. connectors on the {len(new_cuts)} new joints")
+        for angle in new_cuts:
+            si = int(angle // SECTOR)
+            audit_joint(sectors[si - 1], sectors[si % PIECES], angle, "new cut")
+    else:
+        print("\n3. no new joints - this is v4's own 4-way split")
 
     print("\n4. the 4 original v4 joints still intact")
-    for angle in EXISTING_CUTS:
-        si = int(angle // 45)
-        audit_joint(sectors[si - 1], sectors[si % 8], angle, "v4 cut ")
+    for angle in V4_CUTS:
+        si = int(angle // SECTOR)
+        audit_joint(sectors[si - 1], sectors[si % PIECES], angle, "v4 cut ")
 
     print(f"\n5. fit on a {BED:.0f} x {BED:.0f} mm bed")
     for i, p in enumerate(sectors):
@@ -183,11 +191,11 @@ def main():
               f"S{i}: needs {sq:.0f} mm square, {tall:.1f} mm tall")
 
     print("\n6. assembled fit - no interference between neighbours")
-    for i in range(8):
-        a, b = sectors[i], sectors[(i + 1) % 8]
+    for i in range(PIECES):
+        a, b = sectors[i], sectors[(i + 1) % PIECES]
         inter = trimesh.boolean.intersection([a, b], engine=S.ENGINE)
         vol = 0.0 if inter is None or inter.is_empty else abs(inter.volume)
-        check(vol < 10.0, f"S{i}/S{(i + 1) % 8}: overlap {vol:.3f} mm3")
+        check(vol < 10.0, f"S{i}/S{(i + 1) % PIECES}: overlap {vol:.3f} mm3")
 
     print("\n" + ("ALL CHECKS PASSED" if not fails
                   else f"{len(fails)} CHECK(S) FAILED"))

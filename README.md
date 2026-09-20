@@ -245,3 +245,27 @@ ellipse. Real bowls are fuller than ellipses, which is presumably why it was
 traced that way, and a couple of millimetres is inside the tolerance of a tape
 measure on porcelain. Tracing the opening on film, as the original was, would
 settle it outright.
+
+### Four pieces, on v4's own cuts
+
+`4pieces/toiletv4_ridged_Q0.stl` ... `_Q3.stl` are the ridged seat split the way
+v4 originally was - the planes X=0 and Z=0, carrying v4's own connectors, no new
+joints made. The quadrants already are that split, so they only needed the
+ridges adding, each clipped to its own 90 degree sector so no ridge material
+crosses a cut plane. Volumes sum to 2208.8 cm3 against the whole seat's 2208.9,
+which is the check that nothing was added or removed.
+
+| piece | footprint mm | tall mm | volume cm3 | smallest square bed |
+|---|---|---|---|---|
+| Q0 | 195.6 x 225.5 | 81.5 | 527.8 | 226 mm |
+| Q1 | 185.4 x 219.5 | 81.6 | 511.5 | 220 mm |
+| Q2 | 191.4 x 213.3 | 81.2 | 583.2 | 207 mm |
+| Q3 | 189.6 x 207.3 | 81.1 | 586.4 | 213 mm |
+
+**These do not fit a 200 mm bed** - they need 207 to 226 mm square, which is the
+reason the seat was re-split into 8 in the first place. The 8-piece set in
+`pieces/` (164-180 mm square) is still there. Everything else about the four
+pieces is sound: each is a single closed shell, every edge used twice, and each
+joint reads back as 2 pegs + 2 tongues at 0.5 mm clearance.
+
+`tools/check8.py` works on either split - it takes the piece count from the file.

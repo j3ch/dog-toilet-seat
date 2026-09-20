@@ -31,6 +31,7 @@ import split8 as S
 ROOT = Path(__file__).resolve().parent.parent
 OUT_WHOLE = str(ROOT / "toiletv4_ridged.stl")
 OUT_SPLIT = str(ROOT / "toiletv4_ridged_in_8.stl")
+OUT_SPLIT4 = str(ROOT / "toiletv4_ridged_in_4.stl")
 
 # --- ridge pattern ---------------------------------------------------------
 PITCH = 2.5         # ring spacing read off toiletv5_rings.svg
@@ -81,10 +82,10 @@ def band_prisms(hole, body, to_3d):
     return trimesh.util.concatenate(prisms)
 
 
-def sector_wedge(sector, reach=600.0, half_height=200.0):
-    """Solid covering one 45 degree sector, on the planes the pieces are cut on."""
-    a = math.radians(sector * 45.0)
-    b = math.radians((sector + 1) * 45.0)
+def sector_wedge(sector, span=45.0, reach=600.0, half_height=200.0):
+    """Solid covering one sector, on the planes the pieces are cut on."""
+    a = math.radians(sector * span)
+    b = math.radians((sector + 1) * span)
     tri = shapely.Polygon([(0.0, 0.0),
                            (reach * math.cos(a), reach * math.sin(a)),
                            (reach * math.cos(b), reach * math.sin(b))])
@@ -94,14 +95,14 @@ def sector_wedge(sector, reach=600.0, half_height=200.0):
     prism.apply_transform(trimesh.transformations.rotation_matrix(
         math.pi / 2, [1, 0, 0]))
     prism.apply_translation([0.0, half_height, 0.0])
-    mid = math.radians(sector * 45 + 22.5)
+    mid = math.radians(sector * span + span / 2)
     probe = [reach / 2 * math.cos(mid), 0.0, reach / 2 * math.sin(mid)]
     if not prism.contains([probe])[0]:
         raise SystemExit(f"sector {sector} wedge does not cover its own bisector")
     return prism
 
 
-def add_ridges(mesh, prisms, sector=None):
+def add_ridges(mesh, prisms, sector=None, span=45.0):
     """Raise the banded parts of this part's top face by RIDGE_H.
 
     The stock is the part itself lifted and clipped to the bands, so it overlaps
@@ -112,7 +113,7 @@ def add_ridges(mesh, prisms, sector=None):
     lifted.apply_translation([0.0, RIDGE_H, 0.0])
     stock = trimesh.boolean.intersection([lifted, prisms], engine=S.ENGINE)
     if sector is not None:
-        stock = trimesh.boolean.intersection([stock, sector_wedge(sector)],
+        stock = trimesh.boolean.intersection([stock, sector_wedge(sector, span)],
                                              engine=S.ENGINE)
     return trimesh.boolean.union([mesh, stock], engine=S.ENGINE)
 
@@ -168,6 +169,22 @@ def main():
         raise SystemExit("ridges did not weld to the body")
     whole.export(OUT_WHOLE)
     print(f"wrote {OUT_WHOLE}")
+
+    # Four pieces, on v4's own cuts at X=0 and Z=0 and carrying its own
+    # connectors: the quadrants are already exactly that, so they only need the
+    # ridges adding, each clipped to its own 90 degree sector.
+    quads = S.load_quadrants()
+    out4 = []
+    for qi, quad in enumerate(quads):
+        quad = add_ridges(quad, prisms, qi, span=90.0)
+        if report(f"Q{qi}", quad) or not quad.is_watertight:
+            raise SystemExit(f"quadrant {qi} is unsound after adding ridges")
+        mid = math.radians(qi * 90 + 45)
+        quad.apply_translation([S.EXPLODE * math.cos(mid), 0.0,
+                                S.EXPLODE * math.sin(mid)])
+        out4.append(quad)
+    trimesh.util.concatenate(out4).export(OUT_SPLIT4)
+    print(f"wrote {OUT_SPLIT4}")
 
     out = []
     for si, piece in enumerate(load_pieces()):

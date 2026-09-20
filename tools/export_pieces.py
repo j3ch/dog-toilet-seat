@@ -41,8 +41,8 @@ def main():
     mesh = trimesh.load(str(SRC))
     mesh.merge_vertices()
     parts = [p for p in mesh.split(only_watertight=False) if p.volume > 1.0]
-    if len(parts) != 8:
-        raise SystemExit(f"expected 8 pieces in {SRC.name}, got {len(parts)}")
+    if len(parts) not in (4, 8):
+        raise SystemExit(f"expected 4 or 8 pieces in {SRC.name}, got {len(parts)}")
     # name pieces by the sector they came from, as the split and check scripts do
     parts.sort(key=lambda p: math.degrees(math.atan2(p.centroid[2], p.centroid[0])) % 360)
 
@@ -59,12 +59,14 @@ def main():
         p.apply_translation([-(lo[0] + hi[0]) / 2, -(lo[1] + hi[1]) / 2, -lo[2]])
         if not p.is_watertight:
             raise SystemExit(f"S{si} is not watertight")
-        name = f"{SRC.stem.replace('_in_8', '')}_S{si}.stl"
+        tag = "Q" if len(parts) == 4 else "S"
+        stem = SRC.stem.replace("_in_8", "").replace("_in_4", "")
+        name = f"{stem}_{tag}{si}.stl"
         p.export(str(OUTDIR / name))
         w, d, h = p.extents
         total += p.volume
         print(f"{name:38s} {w:7.1f} x {d:6.1f} {h:7.1f} {p.volume / 1000:7.1f} cm3")
-    print(f"\n8 files, {total / 1000:.1f} cm3 total")
+    print(f"\n{len(parts)} files, {total / 1000:.1f} cm3 total")
 
 
 if __name__ == "__main__":
