@@ -23,6 +23,7 @@ hole) but above the 8.5 mm flange slots, so the joints are never touched.
 import math
 from pathlib import Path
 
+import numpy as np
 import shapely
 import trimesh
 
@@ -43,8 +44,7 @@ RIDGE_H = 1.5       # how far the ridges stand above the top surface
 HOLE_Y = 9.0        # height to read the hole outline at, below the top chamfer
 SIMPLIFY = 0.15     # outline simplification, mm
 
-FLOOR = 8.6         # bottom of the ridge stock: under the top face, over the slots
-CEILING = 40.0
+RIDGE_SINK = 1.0    # how far the ridge stock reaches into the part below the top
 EDGE_GAP = 0.5      # keep the bands off the outer wall (see band_prisms)
 
 
@@ -70,27 +70,64 @@ def band_count(hole, clip):
                int(math.ceil((reach - START) / PERIOD)) + 1)
 
 
-def band_prisms(hole, body, to_3d):
-    """One tall prism per raised band, in model space.
+def flat_top_level(mesh, region, tol=0.01):
+    """The height of the part's flat top, asserting that it really is flat.
+
+    Sampled over `region`, the band footprint: the flattening slab is held just
+    inside the outline, so a thin strip of the original rounded rim survives at
+    the very edge, and it is the ground under the ridges that has to be flat.
+    """
+    top = mesh.bounds[1][1]
+    inner = region
+    x0, z0, x1, z1 = inner.bounds
+    gx, gz = np.meshgrid(np.arange(x0, x1, 3.0), np.arange(z0, z1, 3.0))
+    pts = [p for p in np.column_stack([gx.ravel(), gz.ravel()])
+           if inner.contains(shapely.Point(p))]
+    pts = np.array(pts)
+    hit, _, _ = mesh.ray.intersects_location(
+        np.column_stack([pts[:, 0], np.full(len(pts), top + 40.0), pts[:, 1]]),
+        np.tile([0.0, -1.0, 0.0], (len(pts), 1)), multiple_hits=False)
+    y = hit[hit[:, 1] > 5.0][:, 1]
+    off = top - y
+    share = float((off <= tol).mean())
+    if share < 0.99:
+        raise SystemExit(f"top is not flat: only {share * 100:.1f}% of {len(y)} samples "
+                         f"sit at {top:.3f} mm; split8.FLAT_TOP must be on")
+    print(f"  flat over {share * 100:.2f}% of the band footprint; "
+          f"worst dip {off.max():.2f} mm, at the hole edge")
+    return top
+
+
+def band_shapes(hole, body):
+    """The raised bands as 2D polygons.
 
     Bands are clipped to the body footprint pulled in by EDGE_GAP.  Left flush,
-    a band's side face lands exactly on the part's outer wall, and where that
-    wall meets the top face the two surfaces touch at a point - a pinch vertex
-    that keeps the mesh watertight but not a closed shell.
+    a band's side face lands exactly on the part's outer wall, and that
+    coincident pair comes apart in the ridge union.
     """
     clip = body.buffer(-EDGE_GAP)
-    prisms = []
+    out = []
     for k in range(band_count(hole, clip)):
         off = START + k * PERIOD
         band = (hole.buffer(off + RIDGE_W, quad_segs=16)
                 .difference(hole.buffer(off, quad_segs=16))
                 .intersection(clip))
-        if band.is_empty:
-            continue
+        if not band.is_empty:
+            out.append(band)
+    return out
+
+
+def band_prisms(bands, to_3d, top):
+    """One prism per raised band, standing on the flat top."""
+    prisms = []
+    for band in bands:
         for part in getattr(band, "geoms", [band]):
-            p = trimesh.creation.extrude_polygon(part, height=CEILING - FLOOR)
+            p = trimesh.creation.extrude_polygon(part.simplify(S.FLAT_SIMPLIFY),
+                                                 height=RIDGE_SINK + RIDGE_H)
             p.apply_transform(to_3d)
-            p.apply_translation([0.0, FLOOR - HOLE_Y, 0.0])
+            p.apply_translation([0.0, top - RIDGE_SINK - HOLE_Y, 0.0])
+            if not p.is_watertight:
+                raise SystemExit("band prism is not a closed volume")
             prisms.append(p)
     return trimesh.util.concatenate(prisms)
 
@@ -116,17 +153,17 @@ def sector_wedge(sector, span=45.0, reach=600.0, half_height=200.0):
 
 
 def add_ridges(mesh, prisms, sector=None, span=45.0):
-    """Raise the banded parts of this part's top face by RIDGE_H.
+    """Stand the banded parts of the flat top up by RIDGE_H.
 
-    The stock is the part itself lifted and clipped to the bands, so it overlaps
-    the body and welds to it; clipping a piece to its own sector also trims the
-    sliver that would otherwise sit over a peg protruding past the cut plane.
+    On a flat top the bands are just prisms sitting on the plane, so they are
+    unioned straight on.  They reach RIDGE_SINK into the part so the union has
+    real overlap to weld through rather than a coplanar touch, and a piece's
+    stock is clipped to its own sector so nothing lands over a peg protruding
+    past a cut plane.
     """
-    lifted = mesh.copy()
-    lifted.apply_translation([0.0, RIDGE_H, 0.0])
-    stock = trimesh.boolean.intersection([lifted, prisms], engine=S.ENGINE)
+    stock = prisms
     if sector is not None:
-        stock = trimesh.boolean.intersection([stock, sector_wedge(sector, span)],
+        stock = trimesh.boolean.intersection([prisms, sector_wedge(sector, span)],
                                              engine=S.ENGINE)
     return trimesh.boolean.union([mesh, stock], engine=S.ENGINE)
 
@@ -169,28 +206,23 @@ def main():
     hole, body, to_3d = outlines(solid)
     print(f"hole outline: {len(hole.exterior.coords)} pts after {SIMPLIFY} mm simplify")
 
-    prisms = band_prisms(hole, body, to_3d)
-    n = band_count(hole, body.buffer(-EDGE_GAP))
+    bands = band_shapes(hole, body)
+    top = flat_top_level(solid, shapely.union_all(bands))
+    print(f"top is flat at y = {top:.3f} mm")
+    prisms = band_prisms(bands, to_3d, top)
+    n = len(bands)
     print(f"{n} raised bands at {PERIOD:.1f} mm period, {RIDGE_W:.1f} mm wide, "
           f"{RIDGE_H:.1f} mm tall, reaching {START + (n - 1) * PERIOD + RIDGE_W:.1f} mm "
           f"from the hole")
-
-    whole = add_ridges(solid, prisms)
-    loose = report("whole seat", whole)
-    print(f"  ridge material: {(whole.volume - solid.volume) / 1000:.1f} cm3, "
-          f"height {solid.extents[1]:.1f} -> {whole.extents[1]:.1f} mm")
-    if loose:
-        raise SystemExit("ridges did not weld to the body")
-    whole.export(OUT_WHOLE)
-    print(f"wrote {OUT_WHOLE}")
 
     # Four pieces, on v4's own cuts at X=0 and Z=0 and carrying its own
     # connectors: the quadrants are already exactly that, so they only need the
     # ridges adding, each clipped to its own 90 degree sector.
     quads = S.load_quadrants()
-    out4 = []
+    assembled, out4 = [], []
     for qi, quad in enumerate(quads):
         quad = add_ridges(quad, prisms, qi, span=90.0)
+        assembled.append(quad.copy())
         if report(f"Q{qi}", quad) or not quad.is_watertight:
             raise SystemExit(f"quadrant {qi} is unsound after adding ridges")
         mid = math.radians(qi * 90 + 45)
@@ -199,6 +231,17 @@ def main():
         out4.append(quad)
     trimesh.util.concatenate(out4).export(OUT_SPLIT4)
     print(f"wrote {OUT_SPLIT4}")
+
+    # The whole seat, as the four quadrants in assembled position rather than
+    # booleaned into one solid.  Fusing them leaves vertex pairs along the cut
+    # planes too close together to survive STL's float32, which reloads as a
+    # torn mesh; kept separate the file is clean, and the seat is four glued
+    # pieces anyway.
+    whole = trimesh.util.concatenate(assembled)
+    print(f"  whole seat: {len(whole.faces)} faces, {whole.volume / 1000:.1f} cm3, "
+          f"{whole.extents[1]:.1f} mm tall, ridges {(whole.volume - solid.volume) / 1000:.1f} cm3")
+    whole.export(OUT_WHOLE)
+    print(f"wrote {OUT_WHOLE}")
 
     out = []
     for si, piece in enumerate(load_pieces()):

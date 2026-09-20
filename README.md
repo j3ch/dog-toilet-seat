@@ -148,6 +148,21 @@ on a 2.5 mm offset step.
 The v5 hole is a different shape from v4's, so rather than dropping the v5 curves
 onto the wrong outline, `tools/ridges.py` rebuilds the same construction on v4's
 own hole: concentric outward offsets at 2.5 mm, raised on alternating bands.
+### The top is flattened first
+
+v4's top is a shallow dish - it rises about 2.7 mm from the inner edge out to the
+rim - so ridges laid on it are not coplanar and a piece will not sit flat on a
+bed. `split8.py` fills that dish up to its own high point (y = 14.702) before
+anything else, so nothing is cut away and the outer rim keeps its height. The
+slab starts at y = 8.6, above the flange slots, and its footprint is read below
+them so they do not punch holes in it; it is held 0.25 mm inside the outline,
+because flush its wall lands exactly on the part's own wall and that coincident
+pair comes apart in the ridge union. A 0.25 mm strip of the original rounded rim
+survives at the very edge, and the chamfer at the hole is likewise untouched -
+99.87% of the ridged area is flat to within 0.01 mm.
+
+Flattening adds 209 cm3, taking the seat from 2123 to 2333 cm3 before ridges.
+
 Ridges are 2.5 mm wide with 2.5 mm flats between them, stand 1.5 mm proud, and
 start 5 mm out from the hole. The SVG draws 64 rings, which is 32 bands reaching
 162.5 mm - enough for the v5 outline but not for v4, whose back corners are up
@@ -198,19 +213,13 @@ support. The turn is a 180 degree rotation, never a mirror - `export_pieces.py`
 asserts the placement matrix has determinant +1, because mirroring would reverse
 every peg and socket. Pass `--upright` for the other orientation.
 
-That face sits about a degree off parallel to the bed, which over a 170 mm piece
-is enough to lift one end clear of the 1.5 mm ridges, so each piece is also
-**levelled**: `export_pieces.py` shortlists the convex hull facets pointing at
-the bed, lays each one flat in turn, and keeps whichever actually puts the most
-material down. Scoring on real contact rather than on how much area faces the
-bed matters - a face can present plenty of area and still meet the bed on one
-edge, which is what left one piece at 1072 mm2 when scored the naive way.
-
-First-layer contact went from 46-376 mm2 of ridge top to **3547-5854 mm2** on
-the eight pieces, levelling each by 1.03 degrees. The quadrants gain less,
-1030-1629 mm2 at 0.49-0.56 degrees, because a 90 degree piece spans more of the
-curve of the seat and no single plane meets as much of it. A brim is still worth
-using. `--no-level` skips this, `--upright` turns the pieces back over.
+`export_pieces.py` also levels each piece onto its best resting plane, scoring
+candidate hull facets by what actually touches the bed rather than by how much
+area faces it. Now that the top is flat this comes out at **0.00 degrees** - the
+pieces already sit flat - and first-layer contact is **13000-15850 mm2** on the
+quadrants and **5655-8794 mm2** on the eighths. Before the top was flattened
+those were 1030-1629 and 3547-5854 mm2, at about a degree of tilt.
+`--no-level` skips it, `--upright` turns the pieces back over.
 
 ## Fitting the measured bowl
 

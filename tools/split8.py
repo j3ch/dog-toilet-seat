@@ -49,6 +49,24 @@ EXPLODE = 40.0                   # radial explode distance for the export
 # bisects none of them is 0.5 mm above the highest, leaving 65.4 mm of skirt.
 SKIRT_TRIM_Y = -65.4
 
+# v4's top is a shallow dish: it rises about 2.7 mm from the inner edge out to
+# the rim, so ridges laid on it are not coplanar.  Filling it up to its own high
+# point makes the standing surface a true plane and takes nothing away.  The
+# slab starts above the 8.5 mm flange slots so the joints are untouched, and its
+# footprint is read below them, so they do not punch holes in it.
+FLAT_TOP = True
+FLAT_FLOOR = 8.6
+FLAT_FOOTPRINT_YS = (2.0, 9.0)
+# The section outline comes back with a few zero-length segments, which split
+# the slab's triangulation into separate shells; this drops them without moving
+# the outline (volume is identical to a tenth of a mm3).
+FLAT_SIMPLIFY = 0.001
+# Hold the slab a hair inside the outline.  Flush, its wall lands exactly on the
+# part's own outer wall, and that coincident pair survives the booleans only to
+# come apart in the ridge union - 48 non-manifold edges along it.  The cost is a
+# 0.25 mm strip of the original rounded rim left at the very edge.
+FLAT_INSET = 0.25
+
 
 def frame(angle_deg):
     """(u, v, n) for the radial cut plane at `angle_deg`.
@@ -96,6 +114,12 @@ def load_quadrants():
         for p in parts:
             if not p.is_watertight:
                 raise SystemExit("quadrant is not watertight after the skirt trim")
+    if FLAT_TOP:
+        level = max(p.bounds[1][1] for p in parts)
+        parts = [flatten_top(p, level) for p in parts]
+        for p in parts:
+            if not p.is_watertight:
+                raise SystemExit("quadrant is not watertight after flattening")
     parts.sort(key=lambda p: math.degrees(math.atan2(p.centroid[2], p.centroid[0])) % 360)
     return parts
 
@@ -122,6 +146,49 @@ def profile(mesh, angle, offset):
                              [conv(r.coords) for r in p.interiors])
              for p in planar.polygons_full]
     return shapely.union_all(polys) if polys else None
+
+
+def xz_outline(mesh, y):
+    """The solid's cross-section at height `y`, as a polygon in world X/Z."""
+    sec = mesh.section(plane_normal=[0, 1, 0], plane_origin=[0, y, 0])
+    if sec is None:
+        return None
+    planar, to_3d = sec.to_planar(normal=[0, 1, 0])
+
+    def conv(coords):
+        a = np.asarray(coords)
+        w = np.column_stack([a[:, 0], a[:, 1], np.zeros(len(a)), np.ones(len(a))]) @ to_3d.T
+        return w[:, [0, 2]]
+
+    polys = [shapely.Polygon(conv(p.exterior.coords),
+                             [conv(r.coords) for r in p.interiors])
+             for p in planar.polygons_full]
+    return shapely.union_all(polys) if polys else None
+
+
+def flatten_top(mesh, level):
+    """Fill the dished top up to a flat plane at `level`.
+
+    The footprint is the union of cross-sections taken below the flange slots
+    and just above them: below, the outline is clean but slightly drafted in;
+    above, it is full width.  Taken at slot height it would come back with
+    slot-shaped holes and notch the new surface.
+    """
+    foot = shapely.union_all([o for o in
+                              (xz_outline(mesh, y) for y in FLAT_FOOTPRINT_YS)
+                              if o is not None])
+    foot = foot.buffer(-FLAT_INSET)
+    slabs = []
+    for part in getattr(foot, "geoms", [foot]):
+        part = part.simplify(FLAT_SIMPLIFY)
+        p = trimesh.creation.extrude_polygon(part, height=level - FLAT_FLOOR)
+        if not p.is_watertight:
+            raise SystemExit("flattening slab is not a closed volume")
+        p.apply_transform(trimesh.transformations.rotation_matrix(
+            math.pi / 2, [1, 0, 0]))
+        p.apply_translation([0.0, level, 0.0])
+        slabs.append(p)
+    return trimesh.boolean.union([mesh] + slabs, engine=ENGINE)
 
 
 def spans(region, y):
