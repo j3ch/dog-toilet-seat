@@ -149,7 +149,10 @@ The v5 hole is a different shape from v4's, so rather than dropping the v5 curve
 onto the wrong outline, `tools/ridges.py` rebuilds the same construction on v4's
 own hole: concentric outward offsets at 2.5 mm, raised on alternating bands.
 Ridges are 2.5 mm wide with 2.5 mm flats between them, stand 1.5 mm proud, and
-start 5 mm out from the hole. They are cut from a lifted copy of the part rather
+start 5 mm out from the hole. The SVG draws 64 rings, which is 32 bands reaching
+162.5 mm - enough for the v5 outline but not for v4, whose back corners are up
+to 185 mm from the hole and were left flat for the last 20-23 mm. The band count
+is taken from the geometry instead, which comes to 38 here. They are cut from a lifted copy of the part rather
 than stamped on at a fixed height, so they follow the sloping top face exactly.
 All of that is parameterised at the top of the script.
 
@@ -183,9 +186,9 @@ as an argument.
 | S1 | 171.0 x 169.6 | 79.6 | 289.7 |
 | S2 | 170.0 x 170.6 | 79.6 | 291.3 |
 | S3 | 162.1 x 163.6 | 79.2 | 219.1 |
-| S4 | 165.5 x 164.6 | 79.3 | 255.2 |
-| S5 | 179.6 x 178.7 | 79.6 | 326.8 |
-| S6 | 179.1 x 180.5 | 79.6 | 327.4 |
+| S4 | 165.5 x 164.6 | 79.3 | 255.3 |
+| S5 | 179.6 x 178.7 | 79.6 | 327.2 |
+| S6 | 179.1 x 180.5 | 79.6 | 327.8 |
 | S7 | 168.7 x 169.1 | 79.3 | 258.0 |
 
 They are exported **turned over**: ridged face down, skirt pointing up. Printed
@@ -271,10 +274,10 @@ which is the check that nothing was added or removed.
 
 | piece | footprint mm | tall mm | volume cm3 | smallest square bed |
 |---|---|---|---|---|
-| Q0 | 195.6 x 225.5 | 81.5 | 527.8 | 226 mm |
-| Q1 | 185.4 x 219.5 | 81.6 | 511.5 | 220 mm |
-| Q2 | 191.4 x 213.3 | 81.2 | 583.2 | 207 mm |
-| Q3 | 189.6 x 207.3 | 81.1 | 586.4 | 213 mm |
+| Q0 | 197.7 x 226.6 | 80.2 | 527.8 | 226 mm |
+| Q1 | 187.6 x 220.8 | 80.3 | 511.5 | 220 mm |
+| Q2 | 192.5 x 214.3 | 80.3 | 583.6 | 213 mm |
+| Q3 | 191.0 x 208.6 | 80.3 | 586.9 | 207 mm |
 
 **These do not fit a 200 mm bed** - they need 207 to 226 mm square, which is the
 reason the seat was re-split into 8 in the first place. The 8-piece set in

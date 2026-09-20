@@ -38,7 +38,7 @@ PITCH = 2.5         # ring spacing read off toiletv5_rings.svg
 RIDGE_W = PITCH     # width of a raised band
 PERIOD = 2 * PITCH  # raised, then flat
 START = 2 * PITCH   # first ridge sits where the SVG's innermost ring does
-N_RINGS = 64        # as drawn in the SVG
+N_RINGS = 64        # as drawn in the SVG - a floor, not the count used
 RIDGE_H = 1.5       # how far the ridges stand above the top surface
 HOLE_Y = 9.0        # height to read the hole outline at, below the top chamfer
 SIMPLIFY = 0.15     # outline simplification, mm
@@ -57,6 +57,19 @@ def outlines(mesh, y=HOLE_Y):
     return shapely.Polygon(ring).simplify(SIMPLIFY), body, to_3d
 
 
+def band_count(hole, clip):
+    """How many bands it takes to reach the far corner of the flange.
+
+    The SVG draws 64 rings, which is 32 bands and reaches 162.5 mm from the
+    hole.  v4's back corners are up to 185 mm out, so a fixed 32 leaves a flat
+    band 20-23 mm wide there; the count is taken from the geometry instead.
+    """
+    reach = max(hole.exterior.distance(shapely.Point(p))
+                for p in clip.exterior.coords)
+    return max(N_RINGS // 2,
+               int(math.ceil((reach - START) / PERIOD)) + 1)
+
+
 def band_prisms(hole, body, to_3d):
     """One tall prism per raised band, in model space.
 
@@ -67,7 +80,7 @@ def band_prisms(hole, body, to_3d):
     """
     clip = body.buffer(-EDGE_GAP)
     prisms = []
-    for k in range(N_RINGS // 2):
+    for k in range(band_count(hole, clip)):
         off = START + k * PERIOD
         band = (hole.buffer(off + RIDGE_W, quad_segs=16)
                 .difference(hole.buffer(off, quad_segs=16))
@@ -157,9 +170,10 @@ def main():
     print(f"hole outline: {len(hole.exterior.coords)} pts after {SIMPLIFY} mm simplify")
 
     prisms = band_prisms(hole, body, to_3d)
-    print(f"{N_RINGS // 2} raised bands at {PERIOD:.1f} mm period, "
-          f"{RIDGE_W:.1f} mm wide, {RIDGE_H:.1f} mm tall, "
-          f"first at {START:.1f} mm from the hole")
+    n = band_count(hole, body.buffer(-EDGE_GAP))
+    print(f"{n} raised bands at {PERIOD:.1f} mm period, {RIDGE_W:.1f} mm wide, "
+          f"{RIDGE_H:.1f} mm tall, reaching {START + (n - 1) * PERIOD + RIDGE_W:.1f} mm "
+          f"from the hole")
 
     whole = add_ridges(solid, prisms)
     loose = report("whole seat", whole)
