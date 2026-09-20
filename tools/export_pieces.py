@@ -5,7 +5,12 @@ positions with Y up.  Slicers want one solid per file, Z up, sitting on the bed.
 Each piece is converted to Z up, turned about the vertical axis to its smallest
 square footprint, centred on the origin and dropped onto Z=0.
 
-    python tools/export_pieces.py [split.stl] [outdir]
+Pieces are turned over by default so the large ridged face is toward the bed and
+the skirt points up: printed the other way up, the flange cantilevers out 80 mm
+above the thin bottom edge of the skirt and needs support under all of it.  Pass
+--upright to keep them the way the seat is used.
+
+    python tools/export_pieces.py [split.stl] [outdir] [--upright]
 """
 
 import math
@@ -18,8 +23,10 @@ import trimesh
 import split8 as S
 
 ROOT = Path(__file__).resolve().parent.parent
-SRC = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "toiletv4_ridged_in_8.stl"
-OUTDIR = Path(sys.argv[2]) if len(sys.argv) > 2 else ROOT / "pieces"
+ARGV = [a for a in sys.argv[1:] if not a.startswith("--")]
+FLIP = "--upright" not in sys.argv[1:]
+SRC = Path(ARGV[0]) if len(ARGV) > 0 else ROOT / "toiletv4_ridged_in_8.stl"
+OUTDIR = Path(ARGV[1]) if len(ARGV) > 1 else ROOT / "pieces"
 
 
 def best_spin(mesh):
@@ -47,14 +54,23 @@ def main():
     parts.sort(key=lambda p: math.degrees(math.atan2(p.centroid[2], p.centroid[0])) % 360)
 
     OUTDIR.mkdir(exist_ok=True)
-    print(f"{SRC.name} -> {OUTDIR.name}/\n")
-    print(f"{'file':38s} {'footprint mm':>16s} {'tall':>7s} {'volume':>9s}")
+    print(f"{SRC.name} -> {OUTDIR.name}/"
+          f"   ({'flipped, ridged face down' if FLIP else 'upright, skirt down'})\n")
+    print(f"{'file':38s} {'footprint mm':>16s} {'tall':>7s} {'volume':>9s} {'bed contact':>12s}")
     total = 0.0
     for si, p in enumerate(parts):
-        p.apply_transform(trimesh.transformations.rotation_matrix(
-            math.pi / 2, [1, 0, 0]))                       # model Y up -> Z up
-        p.apply_transform(trimesh.transformations.rotation_matrix(
-            math.radians(best_spin(p)), [0, 0, 1]))
+        # A 180 degree turn, never a mirror: mirroring would reverse every peg
+        # and socket and the pieces would no longer mate.  Asserted below.
+        before = p.volume
+        placed = trimesh.transformations.rotation_matrix(
+            -math.pi / 2 if FLIP else math.pi / 2, [1, 0, 0])
+        p.apply_transform(placed)
+        spin = trimesh.transformations.rotation_matrix(
+            math.radians(best_spin(p)), [0, 0, 1])
+        p.apply_transform(spin)
+        det = np.linalg.det((spin @ placed)[:3, :3])
+        if abs(det - 1.0) > 1e-9 or abs(p.volume - before) > 1e-6 * abs(before):
+            raise SystemExit(f"S{si}: placement is not a pure rotation (det {det:.6f})")
         lo, hi = p.bounds
         p.apply_translation([-(lo[0] + hi[0]) / 2, -(lo[1] + hi[1]) / 2, -lo[2]])
         if not p.is_watertight:
@@ -65,7 +81,13 @@ def main():
         p.export(str(OUTDIR / name))
         w, d, h = p.extents
         total += p.volume
-        print(f"{name:38s} {w:7.1f} x {d:6.1f} {h:7.1f} {p.volume / 1000:7.1f} cm3")
+        sec = p.section(plane_normal=[0, 0, 1], plane_origin=[0, 0, 0.2])
+        contact = 0.0
+        if sec is not None:
+            planar, _ = sec.to_planar(normal=[0, 0, 1])
+            contact = sum(q.area for q in planar.polygons_full)
+        print(f"{name:38s} {w:7.1f} x {d:6.1f} {h:7.1f} {p.volume / 1000:7.1f} cm3"
+              f" {contact:8.0f} mm2")
     print(f"\n{len(parts)} files, {total / 1000:.1f} cm3 total")
 
 

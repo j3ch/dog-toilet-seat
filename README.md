@@ -188,12 +188,18 @@ as an argument.
 | S6 | 180.4 x 179.1 | 95.7 | 342.9 |
 | S7 | 169.0 x 168.7 | 95.7 | 271.9 |
 
-They are exported the way up the seat is used, skirt down. That is not
-necessarily the way to print them - neither orientation gives a flat base. Skirt
-down puts 419-508 mm2 on the bed (the bottom edge of the skirt wall) and then
-cantilevers the flange out 80 mm up, so it wants support. Flipped, the ridged
-face is down but the top surface slopes about 4 mm across the flange, so only the
-outer ridges touch: 46-293 mm2. Whichever you pick, it needs support or a brim.
+They are exported **turned over**: ridged face down, skirt pointing up. Printed
+the other way up the flange cantilevers 80 mm out above the thin bottom edge of
+the skirt and wants support under all of it; this way there is nothing to
+support. The turn is a 180 degree rotation, never a mirror - `export_pieces.py`
+asserts the placement matrix has determinant +1, because mirroring would reverse
+every peg and socket. Pass `--upright` for the other orientation.
+
+The ridged face does not quite lie flat: it is within **0.5-1.3 degrees** of
+parallel to the bed, but over a 170 mm piece that is up to 3 mm, and the ridges
+are only 1.5 mm tall, so the low end stands clear. First-layer contact is
+46-376 mm2 of ridge top. Tilting each piece by that degree or so in the slicer
+takes it to roughly 700-5200 mm2. Use a brim either way.
 
 ## Fitting the measured bowl
 
