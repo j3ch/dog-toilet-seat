@@ -45,6 +45,16 @@ HOLE_Y = 9.0        # height to read the hole outline at, below the top chamfer
 SIMPLIFY = 0.15     # outline simplification, mm
 
 RIDGE_SINK = 1.0    # how far the ridge stock reaches into the part below the top
+
+# Laid on the bed the concentric bands are ~25 unconnected ribbons, 2.5 mm wide
+# and up to 250 mm long, each free to curl at its ends - which is what lifted
+# the first print.  A radial bar across them ties them into one network.  The
+# bars sit on the cut planes, where they fall on a seam rather than in the
+# middle of a face: the four 4-piece borders, plus the four diagonals, because
+# the outermost bands exist only in the corners and never reach a 4-piece
+# border - with only those four, 12373 mm2 stayed loose in 56 pieces.
+BRIDGE_W = 10.0
+BRIDGE_ANGLES = (0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0)
 EDGE_GAP = 0.5      # keep the bands off the outer wall (see band_prisms)
 
 
@@ -99,37 +109,56 @@ def flat_top_level(mesh, region, tol=0.01):
 
 
 def band_shapes(hole, body):
-    """The raised bands as 2D polygons.
+    """The raised pattern as 2D polygons: concentric bands plus the bridges.
 
     Bands are clipped to the body footprint pulled in by EDGE_GAP.  Left flush,
     a band's side face lands exactly on the part's outer wall, and that
     coincident pair comes apart in the ridge union.
+
+    Bands and bridges come back as two lists, each internally non-overlapping.
+    Merging them in 2D first gives one polygon with 1200+ points and 56 holes
+    that the triangulator cannot close, so they are extruded apart and merged
+    as solids instead.
     """
     clip = body.buffer(-EDGE_GAP)
-    out = []
+    inner = hole.buffer(START)
+    shapes, bars = [], []
     for k in range(band_count(hole, clip)):
         off = START + k * PERIOD
         band = (hole.buffer(off + RIDGE_W, quad_segs=16)
                 .difference(hole.buffer(off, quad_segs=16))
                 .intersection(clip))
         if not band.is_empty:
-            out.append(band)
-    return out
+            shapes.append(band)
+    for angle in BRIDGE_ANGLES:
+        t = math.radians(angle)
+        d = np.array([math.cos(t), math.sin(t)])
+        n = np.array([-math.sin(t), math.cos(t)]) * (BRIDGE_W / 2.0)
+        far = d * 400.0
+        bar = shapely.Polygon([tuple(-n), tuple(far - n), tuple(far + n), tuple(n)])
+        bar = bar.intersection(clip).difference(inner)
+        if not bar.is_empty:
+            bars.append(bar)
+    return shapes, bars
 
 
-def band_prisms(bands, to_3d, top):
-    """One prism per raised band, standing on the flat top."""
-    prisms = []
-    for band in bands:
-        for part in getattr(band, "geoms", [band]):
-            p = trimesh.creation.extrude_polygon(part.simplify(S.FLAT_SIMPLIFY),
-                                                 height=RIDGE_SINK + RIDGE_H)
-            p.apply_transform(to_3d)
-            p.apply_translation([0.0, top - RIDGE_SINK - HOLE_Y, 0.0])
-            if not p.is_watertight:
-                raise SystemExit("band prism is not a closed volume")
-            prisms.append(p)
-    return trimesh.util.concatenate(prisms)
+def band_prisms(bands, bars, to_3d, top):
+    """The raised pattern as a solid: bands and bridges, merged."""
+
+    def solids(shapes):
+        out = []
+        for shape in shapes:
+            for part in getattr(shape, "geoms", [shape]):
+                p = trimesh.creation.extrude_polygon(part.simplify(S.FLAT_SIMPLIFY),
+                                                     height=RIDGE_SINK + RIDGE_H)
+                p.apply_transform(to_3d)
+                p.apply_translation([0.0, top - RIDGE_SINK - HOLE_Y, 0.0])
+                if not p.is_watertight:
+                    raise SystemExit("a ridge prism is not a closed volume")
+                out.append(p)
+        return trimesh.util.concatenate(out)
+
+    return trimesh.boolean.union([solids(bands), solids(bars)], engine=S.ENGINE)
 
 
 def sector_wedge(sector, span=45.0, reach=600.0, half_height=200.0):
@@ -206,14 +235,15 @@ def main():
     hole, body, to_3d = outlines(solid)
     print(f"hole outline: {len(hole.exterior.coords)} pts after {SIMPLIFY} mm simplify")
 
-    bands = band_shapes(hole, body)
-    top = flat_top_level(solid, shapely.union_all(bands))
+    bands, bars = band_shapes(hole, body)
+    top = flat_top_level(solid, shapely.union_all(bands + bars))
     print(f"top is flat at y = {top:.3f} mm")
-    prisms = band_prisms(bands, to_3d, top)
-    n = len(bands)
-    print(f"{n} raised bands at {PERIOD:.1f} mm period, {RIDGE_W:.1f} mm wide, "
-          f"{RIDGE_H:.1f} mm tall, reaching {START + (n - 1) * PERIOD + RIDGE_W:.1f} mm "
-          f"from the hole")
+    prisms = band_prisms(bands, bars, to_3d, top)
+    loose = prisms.split(only_watertight=False)
+    print(f"raised pattern: {len(bands)} bands {RIDGE_W:.1f} mm wide at "
+          f"{PERIOD:.1f} mm period, {RIDGE_H:.1f} mm tall, tied by "
+          f"{len(bars)} bridges {BRIDGE_W:.0f} mm wide -> {len(loose)} connected "
+          f"group(s), largest {max(p.volume for p in loose) / prisms.volume * 100:.0f}%")
 
     # Four pieces, on v4's own cuts at X=0 and Z=0 and carrying its own
     # connectors: the quadrants are already exactly that, so they only need the

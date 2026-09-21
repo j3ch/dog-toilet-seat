@@ -216,10 +216,31 @@ every peg and socket. Pass `--upright` for the other orientation.
 `export_pieces.py` also levels each piece onto its best resting plane, scoring
 candidate hull facets by what actually touches the bed rather than by how much
 area faces it. Now that the top is flat this comes out at **0.00 degrees** - the
-pieces already sit flat - and first-layer contact is **13000-15850 mm2** on the
-quadrants and **5655-8794 mm2** on the eighths. Before the top was flattened
-those were 1030-1629 and 3547-5854 mm2, at about a degree of tilt.
-`--no-level` skips it, `--upright` turns the pieces back over.
+pieces already sit flat. `--no-level` skips it, `--upright` turns them back over.
+
+### Bridges across the ridges
+
+A flat top is not enough on its own. The first print still lifted, and the
+first-layer footprint shows why: the concentric bands land on the bed as about
+25 unconnected ribbons, 2.5 mm wide and up to 250 mm long, with nothing joining
+them until 1.5 mm up. Each ribbon is free to curl at its ends. Nothing was out
+of plane - all 13294 mm2 of ridge top sat at exactly z=0 - so trimming ridge
+height would not have helped; it would have left the same 25 ribbons.
+
+A 10 mm radial bar at each cut plane crosses every band and ties them into one
+network, and sits on a seam rather than in the middle of a face. Bars go at all
+eight seam angles, not just the four 4-piece borders: the outermost bands exist
+only in the corners and never reach a 4-piece border, so with four bars
+12373 mm2 was still loose in 56 pieces.
+
+First layer per piece, after: Q0 98% in one region, Q1 99%, Q2 100%, Q3 100%,
+and contact up to **14096-17484 mm2** on the quadrants. Six of the eight
+smaller pieces are 98-100% too; S1 and S4 are 64-67%, since a 45 degree piece
+only meets a bar on one side.
+
+Bands and bars are extruded apart and merged as solids. Merged in 2D first they
+make one polygon with 1200+ points and 56 holes, which the triangulator cannot
+close.
 
 ## Fitting the measured bowl
 
