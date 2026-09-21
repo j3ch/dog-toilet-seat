@@ -233,14 +233,17 @@ eight seam angles, not just the four 4-piece borders: the outermost bands exist
 only in the corners and never reach a 4-piece border, so with four bars
 12373 mm2 was still loose in 56 pieces.
 
-First layer per piece, after: Q0 98% in one region, Q1 99%, Q2 100%, Q3 100%,
-and contact up to **14096-17484 mm2** on the quadrants. Six of the eight
-smaller pieces are 98-100% too; S1 and S4 are 64-67%, since a 45 degree piece
-only meets a bar on one side.
+Closing it off is a plain **10 mm border** right round the outer edge, no ridges
+in it, which catches the outer end of every arc and encloses the pattern. With
+the bars and the border together, **every piece's first layer is a single
+connected region - 100%, all twelve of them**, quadrants and eighths alike.
+Contact is **17083-20265 mm2** on the quadrants and 7680-11289 mm2 on the
+eighths, against 13294-15850 and 3547-5854 before any of this.
 
-Bands and bars are extruded apart and merged as solids. Merged in 2D first they
-make one polygon with 1200+ points and 56 holes, which the triangulator cannot
-close.
+Bands on one side, bars and border on the other, extruded apart and merged as
+solids. Merged in 2D first they make one polygon with 1200+ points and 56
+holes, which the triangulator cannot close. The bars and border do have to be
+unioned with each other first, since the spokes run into the ring.
 
 ## Fitting the measured bowl
 

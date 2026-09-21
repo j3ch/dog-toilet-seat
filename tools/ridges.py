@@ -55,6 +55,9 @@ RIDGE_SINK = 1.0    # how far the ridge stock reaches into the part below the to
 # border - with only those four, 12373 mm2 stayed loose in 56 pieces.
 BRIDGE_W = 10.0
 BRIDGE_ANGLES = (0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0)
+# A plain band right round the outer edge, no ridges in it, closing the pattern
+# into one enclosed loop and catching the outer end of every arc.
+BORDER_W = 10.0
 EDGE_GAP = 0.5      # keep the bands off the outer wall (see band_prisms)
 
 
@@ -139,7 +142,13 @@ def band_shapes(hole, body):
         bar = bar.intersection(clip).difference(inner)
         if not bar.is_empty:
             bars.append(bar)
-    return shapes, bars
+    border = clip.difference(clip.buffer(-BORDER_W))
+    if not border.is_empty:
+        bars.append(border)
+    # The spokes run into the border, so merge them before they are extruded;
+    # the result is one ring with fingers, which triangulates cleanly.
+    merged = shapely.union_all(bars)
+    return shapes, list(getattr(merged, "geoms", [merged]))
 
 
 def band_prisms(bands, bars, to_3d, top):
@@ -242,7 +251,8 @@ def main():
     loose = prisms.split(only_watertight=False)
     print(f"raised pattern: {len(bands)} bands {RIDGE_W:.1f} mm wide at "
           f"{PERIOD:.1f} mm period, {RIDGE_H:.1f} mm tall, tied by "
-          f"{len(bars)} bridges {BRIDGE_W:.0f} mm wide -> {len(loose)} connected "
+          f"{len(BRIDGE_ANGLES)} bridges {BRIDGE_W:.0f} mm wide and a "
+          f"{BORDER_W:.0f} mm border -> {len(loose)} connected "
           f"group(s), largest {max(p.volume for p in loose) / prisms.volume * 100:.0f}%")
 
     # Four pieces, on v4's own cuts at X=0 and Z=0 and carrying its own
