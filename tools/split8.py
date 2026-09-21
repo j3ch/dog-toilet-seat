@@ -65,7 +65,20 @@ FLAT_SIMPLIFY = 0.001
 # part's own outer wall, and that coincident pair survives the booleans only to
 # come apart in the ridge union - 48 non-manifold edges along it.  The cost is a
 # 0.25 mm strip of the original rounded rim left at the very edge.
+#
+# The inset is taken on the assembled seat, so it applies to the outer wall and
+# the hole but not to the cut planes.  Applied per quadrant it also pulled each
+# slab back from its own seams, leaving a 0.5 mm groove down all four of them.
 FLAT_INSET = 0.25
+# Flattening squares off the rounded lip v4 had where the top meets the hole,
+# and that edge is right where Lala's paws sit.  This breaks it back with a
+# 2 mm chamfer, cut as a staircase of 0.2 mm steps - finer than a layer, so the
+# printed edge is rounded by the layer lines anyway.  A true quarter-round was
+# tried first and is not usable: its profile ends in 0.01-0.09 mm offsets from
+# the hole wall, slivers that do not survive STL's float32 and left one
+# quadrant non-watertight on reload.
+HOLE_ROUND_R = 2.0
+HOLE_ROUND_STEPS = 10
 
 
 def frame(angle_deg):
@@ -114,13 +127,28 @@ def load_quadrants():
         for p in parts:
             if not p.is_watertight:
                 raise SystemExit("quadrant is not watertight after the skirt trim")
+    parts.sort(key=lambda p: math.degrees(math.atan2(p.centroid[2], p.centroid[0])) % 360)
     if FLAT_TOP:
         level = max(p.bounds[1][1] for p in parts)
-        parts = [flatten_top(p, level) for p in parts]
+        foot = flat_footprint(trimesh.boolean.union(parts, engine=ENGINE))
+        parts = [flatten_top(p, level, foot.intersection(sector_polygon(i)))
+                 for i, p in enumerate(parts)]
         for p in parts:
             if not p.is_watertight:
                 raise SystemExit("quadrant is not watertight after flattening")
-    parts.sort(key=lambda p: math.degrees(math.atan2(p.centroid[2], p.centroid[0])) % 360)
+        if HOLE_ROUND_R:
+            # Built once from the shared footprint so the four quadrants get
+            # the same edge, then subtracted from each.
+            rings = [shapely.Polygon(r) for g in getattr(foot, "geoms", [foot])
+                     for r in g.interiors]
+            if not rings:
+                raise SystemExit("no hole in the flattening footprint to round")
+            cutter = hole_round_cutter(max(rings, key=lambda r: r.area), level)
+            parts = [trimesh.boolean.difference([p, cutter], engine=ENGINE)
+                     for p in parts]
+            for p in parts:
+                if not p.is_watertight:
+                    raise SystemExit("quadrant is not watertight after rounding")
     return parts
 
 
@@ -166,18 +194,29 @@ def xz_outline(mesh, y):
     return shapely.union_all(polys) if polys else None
 
 
-def flatten_top(mesh, level):
-    """Fill the dished top up to a flat plane at `level`.
+def flat_footprint(mesh):
+    """Where the flattening slab goes, as a polygon in world X/Z.
 
-    The footprint is the union of cross-sections taken below the flange slots
-    and just above them: below, the outline is clean but slightly drafted in;
-    above, it is full width.  Taken at slot height it would come back with
-    slot-shaped holes and notch the new surface.
+    The union of cross-sections taken below the flange slots and just above
+    them: below, the outline is clean but slightly drafted in; above, it is
+    full width.  Taken at slot height it would come back with slot-shaped holes
+    and notch the new surface.
     """
     foot = shapely.union_all([o for o in
                               (xz_outline(mesh, y) for y in FLAT_FOOTPRINT_YS)
                               if o is not None])
-    foot = foot.buffer(-FLAT_INSET)
+    return foot.buffer(-FLAT_INSET)
+
+
+def sector_polygon(index, span=90.0, reach=1000.0):
+    a, b = math.radians(index * span), math.radians((index + 1) * span)
+    return shapely.Polygon([(0.0, 0.0),
+                            (reach * math.cos(a), reach * math.sin(a)),
+                            (reach * math.cos(b), reach * math.sin(b))])
+
+
+def flatten_top(mesh, level, foot):
+    """Fill the dished top up to a flat plane at `level`."""
     slabs = []
     for part in getattr(foot, "geoms", [foot]):
         part = part.simplify(FLAT_SIMPLIFY)
@@ -189,6 +228,33 @@ def flatten_top(mesh, level):
         p.apply_translation([0.0, level, 0.0])
         slabs.append(p)
     return trimesh.boolean.union([mesh] + slabs, engine=ENGINE)
+
+
+def hole_round_cutter(hole, level, radius=HOLE_ROUND_R, steps=HOLE_ROUND_STEPS):
+    """A 45 degree break along the top edge of the hole, as a cutting solid.
+
+    Stepped rather than swept: at 2 mm over 10 steps each facet is 0.2 mm,
+    finer than a layer.  The staircase circumscribes the chamfer, so it never
+    leaves material proud of it.
+
+    `hole` comes from the flattening footprint rather than from a section of
+    the assembled seat: a hairline groove at one seam opens the annulus there,
+    so the hole does not come back as a ring and the largest one found is a
+    sliver.
+    """
+    solids = []
+    for i in range(steps):
+        d_lo = radius * i / steps            # depth of the shallow edge of this step
+        d_hi = radius * (i + 1) / steps
+        off = radius - d_lo
+        region = hole.buffer(off) if off > 0 else hole
+        p = trimesh.creation.extrude_polygon(region.simplify(FLAT_SIMPLIFY),
+                                             height=d_hi + 1.0)
+        p.apply_transform(trimesh.transformations.rotation_matrix(
+            math.pi / 2, [1, 0, 0]))
+        p.apply_translation([0.0, level + 1.0, 0.0])
+        solids.append(p)
+    return trimesh.boolean.union(solids, engine=ENGINE)
 
 
 def spans(region, y):

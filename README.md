@@ -163,6 +163,20 @@ survives at the very edge, and the chamfer at the hole is likewise untouched -
 
 Flattening adds 209 cm3, taking the seat from 2123 to 2333 cm3 before ridges.
 
+Flattening would also square off the rounded lip v4 had where the top meets the
+hole - the edge Lala's paws sit against - so a **2 mm 45 degree break** is cut
+back along it, as a staircase of 0.2 mm steps that the layer lines round off
+anyway. A true quarter-round was tried first and is not usable: its profile ends
+in 0.01-0.09 mm offsets from the hole wall, slivers that do not survive STL's
+float32 and left one quadrant non-watertight on reload. The break removes
+1601 mm3, against 1599 predicted from the 727 mm hole perimeter.
+
+The inset is taken on the assembled seat, so it pulls the slab back from the
+outer wall and the hole but not from the cut planes. Applied per quadrant it
+also pulled each slab back from its own seams, leaving a 0.5 mm groove down all
+four of them. A hairline one (<= 0.2 mm) remains; the bridges cover it
+everywhere except the innermost 5 mm.
+
 Ridges are 2.5 mm wide with 2.5 mm flats between them, stand 1.5 mm proud, and
 start 5 mm out from the hole. The SVG draws 64 rings, which is 32 bands reaching
 162.5 mm - enough for the v5 outline but not for v4, whose back corners are up
