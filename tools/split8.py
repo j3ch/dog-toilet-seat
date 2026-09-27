@@ -15,6 +15,7 @@ from pathlib import Path
 
 import numpy as np
 import shapely
+import shapely.affinity
 import trimesh
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -48,6 +49,25 @@ EXPLODE = 40.0                   # radial explode distance for the export
 # sockets top out at -68.0, -67.0, -67.0 and -65.905 - so the deepest cut that
 # bisects none of them is 0.5 mm above the highest, leaving 65.4 mm of skirt.
 SKIRT_TRIM_Y = -65.4
+
+# The long axis is Z, and the back is -Z: the bowl opening (and so the skirt) is
+# squarer at the back and tapers to the front, as in measurements.jpg.
+#
+# A bidet seat sits over the back of the rim, so the back end is cut off square
+# by a straight line, 0.5 in in from its furthest point.  The skirt ends ~50 mm
+# short of that, so only flange is removed.
+BACK_CLIP = 12.7
+# The front edge of the top is pushed 1 in further forward.  The flange is a
+# rounded rectangle, straight along its sides, so the front end is moved out
+# bodily from a line across the straight part and the sides are run on to meet
+# it.  The new strip is the flange's full depth, from its flat underside at y=0
+# up into the flattening slab, and reaches OVERLAP back into the old edge so the
+# union welds through solid rather than meeting on the rounded wall.
+FRONT_EXTEND = 25.4
+FRONT_STRETCH_FROM = 30.0        # distance back from the front edge to stretch at
+EXTEND_BOTTOM, EXTEND_TOP = 0.0, 9.5
+EXTEND_OVERLAP = 2.0
+OUTLINE_Y = 4.0                  # height the full-width outline is read at
 
 # v4's top is a shallow dish: it rises about 2.7 mm from the inner edge out to
 # the rim, so ridges laid on it are not coplanar.  Filling it up to its own high
@@ -128,9 +148,30 @@ def load_quadrants():
             if not p.is_watertight:
                 raise SystemExit("quadrant is not watertight after the skirt trim")
     parts.sort(key=lambda p: math.degrees(math.atan2(p.centroid[2], p.centroid[0])) % 360)
+    if FRONT_EXTEND or BACK_CLIP:
+        sec = xz_outline(parts, OUTLINE_Y)
+        outer = shapely.Polygon(max(getattr(sec, "geoms", [sec]),
+                                    key=lambda g: g.area).exterior)
+    if FRONT_EXTEND:
+        ext = front_extension(outer)
+        parts = [extend_front(p, ext.intersection(sector_polygon(i)))
+                 for i, p in enumerate(parts)]
+        for p in parts:
+            if not p.is_watertight:
+                raise SystemExit("quadrant is not watertight after extending the front")
+    if BACK_CLIP:
+        z_cut = outer.bounds[1] + BACK_CLIP
+        keep = trimesh.creation.box(
+            extents=[2000.0, 400.0, 2000.0],
+            transform=trimesh.transformations.translation_matrix(
+                [0.0, 0.0, z_cut + 1000.0]))
+        parts = [trimesh.boolean.intersection([p, keep], engine=ENGINE) for p in parts]
+        for p in parts:
+            if not p.is_watertight:
+                raise SystemExit("quadrant is not watertight after clipping the back")
     if FLAT_TOP:
         level = max(p.bounds[1][1] for p in parts)
-        foot = flat_footprint(trimesh.boolean.union(parts, engine=ENGINE))
+        foot = flat_footprint(parts)
         parts = [flatten_top(p, level, foot.intersection(sector_polygon(i)))
                  for i, p in enumerate(parts)]
         for p in parts:
@@ -177,7 +218,24 @@ def profile(mesh, angle, offset):
 
 
 def xz_outline(mesh, y):
-    """The solid's cross-section at height `y`, as a polygon in world X/Z."""
+    """The solid's cross-section at height `y`, as a polygon in world X/Z.
+
+    Given a list of pieces, their sections are unioned in 2D.  That is how the
+    assembled outline is taken: booleaning the quadrants into one solid first is
+    not reliable once the front is extended - the seam at X=0 comes back with
+    open loops in its section, and the outline loses its hole.
+    """
+    if isinstance(mesh, (list, tuple)):
+        polys = [o for o in (xz_outline(m, y) for m in mesh) if o is not None]
+        if not polys:
+            return None
+        # Where two pieces' faces meet on a seam without sharing vertices the
+        # union leaves a zero-width ring along it; drop those.
+        merged = shapely.union_all(polys)
+        return shapely.union_all([
+            shapely.Polygon(g.exterior, [r for r in g.interiors
+                                         if shapely.Polygon(r).area > 1.0])
+            for g in getattr(merged, "geoms", [merged])])
     sec = mesh.section(plane_normal=[0, 1, 0], plane_origin=[0, y, 0])
     if sec is None:
         return None
@@ -206,6 +264,45 @@ def flat_footprint(mesh):
                               (xz_outline(mesh, y) for y in FLAT_FOOTPRINT_YS)
                               if o is not None])
     return foot.buffer(-FLAT_INSET)
+
+
+def front_extension(outer):
+    """The strip added to the front, as a polygon in world X/Z.
+
+    The front end of `outer` beyond a line FRONT_STRETCH_FROM back from the
+    edge is moved forward by FRONT_EXTEND and the gap bridged at the width the
+    outline has on that line; whatever that adds, plus EXTEND_OVERLAP of the old
+    edge, is the strip.
+    """
+    x0, _, x1, z_front = outer.bounds
+    z0 = z_front - FRONT_STRETCH_FROM
+    across = shapely.LineString([(x0 - 1, z0), (x1 + 1, z0)]).intersection(outer)
+    if across.geom_type != "LineString":
+        raise SystemExit("front of the outline is not a single span to stretch")
+    a, b = across.bounds[0], across.bounds[2]
+    tip = outer.intersection(shapely.box(x0 - 1, z0, x1 + 1, z_front + 1))
+    grown = shapely.union_all([
+        shapely.affinity.translate(tip, 0.0, FRONT_EXTEND),
+        shapely.box(a, z0, b, z0 + FRONT_EXTEND)])
+    strip = grown.difference(outer.buffer(-EXTEND_OVERLAP))
+    return strip.intersection(shapely.box(x0 - 1, z0, x1 + 1, z_front + FRONT_EXTEND + 1))
+
+
+def extend_front(mesh, foot):
+    """Union a full-depth block of flange onto `mesh` over `foot`."""
+    blocks = []
+    for part in getattr(foot, "geoms", [foot]):
+        if part.is_empty or part.area < 1.0:
+            continue
+        p = trimesh.creation.extrude_polygon(part.simplify(FLAT_SIMPLIFY),
+                                             height=EXTEND_TOP - EXTEND_BOTTOM)
+        p.apply_transform(trimesh.transformations.rotation_matrix(
+            math.pi / 2, [1, 0, 0]))
+        p.apply_translation([0.0, EXTEND_TOP, 0.0])
+        blocks.append(p)
+    if not blocks:
+        return mesh
+    return trimesh.boolean.union([mesh] + blocks, engine=ENGINE)
 
 
 def sector_polygon(index, span=90.0, reach=1000.0):
