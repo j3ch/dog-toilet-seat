@@ -112,6 +112,20 @@ def audit_joint(pa, pb, angle, label):
     check(len(pegs) == np_ + nt and np_ >= 2 and nt == 2,
           f"{label} {angle:3.0f}: {np_} pegs + {nt} tongues "
           + str(sorted(k for k, _, _ in pegs)))
+    # The back clip runs through the outer tongue of v4's joint at 270 and the
+    # slot it sits in, leaving a shortened tongue in a slot open to the back
+    # face.  That slot is no longer a void inside the section, so it is not
+    # counted; the tongue still has to fit it, which section 6 checks.
+    slots = [h[1] for h in holes if h[0].startswith("rect")]
+    clipped = [t for t in pegs if t[0].startswith("rect")
+               and not any(abs(w - t[1] - 1.0) < 0.3 for w in slots)]
+    if clipped:
+        check(bool(S.BACK_CLIP),
+              f"{label} {angle:3.0f}: {len(clipped)} tongue(s) cut short by the "
+              f"back clip, now {', '.join(f'{t[1]:.1f}' for t in clipped)} mm long "
+              "in a slot open to the back")
+        pegs = [t for t in pegs if t not in clipped]
+        nt -= len(clipped)
     check((nh, ns) == (np_, nt),
           f"{label} {angle:3.0f}: {nh} holes + {ns} slots to match  "
           + str(sorted(k for k, _, _ in holes)))

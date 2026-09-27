@@ -333,3 +333,59 @@ pieces is sound: each is a single closed shell, every edge used twice, and each
 joint reads back as 2 pegs + 2 tongues at 0.5 mm clearance.
 
 `tools/check8.py` works on either split - it takes the piece count from the file.
+
+## Clearing the bidet, and a longer front
+
+A bidet seat sits over the back of the rim, so the back end of the insert is now
+**cut off square, 0.5 in (12.7 mm) in** from its furthest point. The front edge of
+the top is **pushed 1 in (25.4 mm) further forward**. The seat goes from 427 to
+439.5 mm long, now running from z = -194.6 to +244.9 mm.
+
+Which end is which: the long axis is Z, and **the back is -Z**. The bowl opening
+in `measurements.jpg` is squarer at the back and tapers to the front, and the
+skirt does the same (see `skirt_vs_bowl.png`). `split8.py` has the two amounts
+as `BACK_CLIP` and `FRONT_EXTEND`, and both are applied to the quadrants before
+the top is flattened. The flat top, the ridges and the 10 mm border therefore all
+follow the new outline.
+
+- **Back:** a plain cut across the flange. The skirt ends about 50 mm short of
+  the cut, so only flange comes off. The corners are left square. The cut runs
+  3.9 mm into the outer flange slot on v4's own joint at the back (270 degrees),
+  along with the tongue that fits it. That joint now carries a 31.6 mm tongue in
+  a slot open to the back face. It still locates the pieces and is glued anyway.
+  `check8.py` reports it as a clipped tongue instead of a missing slot.
+- **Front:** the flange is straight along its sides, so the front end is moved
+  out bodily from a line 30 mm back from the edge, and the sides run on to meet
+  it. The new strip is full flange depth, from the flat underside at y = 0 up
+  into the flattening slab. It overlaps the old edge by 2 mm, so the union welds
+  through solid material. It hangs 1 in past where the old edge met the rim, with
+  nothing under it.
+
+The assembled outline is now taken as a 2D union of each piece's section. Once
+the front is extended, booleaning the quadrants into one solid leaves open loops
+along the X=0 seam, and the hole could not be found in that section.
+
+`export_pieces.py` now reads every file back after writing it. Two pieces
+(S2, Q1) came back with a pinhole where float32 rounding collapsed a sliver on
+the seam face. It is closed on export, with the volume change checked at under
+0.01 mm3.
+
+| piece | footprint mm | volume cm3 |
+|---|---|---|
+| S0 | 166.9 x 168.6 | 263.6 |
+| S1 | 187.1 x 187.2 | 389.7 |
+| S2 | 185.4 x 158.5 | 388.9 |
+| S3 | 163.7 x 161.9 | 243.7 |
+| S4 | 165.4 x 164.4 | 285.4 |
+| S5 | 175.4 x 174.7 | 327.1 |
+| S6 | 173.0 x 173.9 | 328.1 |
+| S7 | 168.7 x 169.0 | 290.8 |
+
+All eight still fit the 200 mm bed; the two front pieces are now the largest,
+at 187 and 185 mm square. The four-piece set grows to 195.6 x 250.9 (Q0) and
+185.4 x 244.9 (Q1) at the front and still needs a larger bed. Every piece file is
+a single closed shell with every edge used exactly twice. Each one's first layer
+is still one connected region, and both splits pass `check8.py`, apart from the
+4-piece set's usual bed-size failures.
+
+The scripts also need `networkx` now, for trimesh's section paths.

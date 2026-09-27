@@ -87,6 +87,38 @@ def resting_rotation(mesh, toward=(0.0, 0.0, -1.0), max_tilt=15.0):
     return trimesh.geometry.align_vectors(hn, toward), tilt, best[0]
 
 
+def edges_ok(mesh):
+    """Closed, one shell, every edge used by exactly two faces."""
+    _, uses = np.unique(mesh.edges_sorted, axis=0, return_counts=True)
+    return mesh.is_watertight and mesh.euler_number == 2 and bool((uses == 2).all())
+
+
+def write_sound(mesh, path):
+    """Export, and make sure the file reads back as the same closed solid.
+
+    STL stores float32.  Where a boolean has split a long edge with vertices
+    lying on it, rounding can collapse those into zero-area slivers and merge
+    vertices that were distinct, leaving edges used 3 or 4 times.  The fix is
+    local: drop the zero-area faces and close the pinhole they leave.
+    """
+    mesh.export(str(path))
+    back = trimesh.load(str(path))
+    if edges_ok(back):
+        return
+    before = back.volume
+    back.update_faces(back.nondegenerate_faces(height=1e-9))
+    back.remove_unreferenced_vertices()
+    trimesh.repair.fill_holes(back)
+    back.fix_normals()
+    if not edges_ok(back) or abs(back.volume - before) > 0.01:
+        raise SystemExit(f"{path.name} does not survive STL's float32 and could "
+                         "not be repaired")
+    back.export(str(path))
+    if not edges_ok(trimesh.load(str(path))):
+        raise SystemExit(f"{path.name} is still unsound after repair")
+    print(f"  ({path.name}: closed a float32 pinhole on export)")
+
+
 def main():
     mesh = trimesh.load(str(SRC))
     mesh.merge_vertices()
@@ -132,7 +164,7 @@ def main():
         tag = "Q" if len(parts) == 4 else "S"
         stem = SRC.stem.replace("_in_8", "").replace("_in_4", "")
         name = f"{stem}_{tag}{si}.stl"
-        p.export(str(OUTDIR / name))
+        write_sound(p, OUTDIR / name)
         w, d, h = p.extents
         total += p.volume
         contact = bed_contact(p)
