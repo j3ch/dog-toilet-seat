@@ -61,13 +61,17 @@ BORDER_W = 10.0
 EDGE_GAP = 0.5      # keep the bands off the outer wall (see band_prisms)
 
 
-def outlines(mesh, y=HOLE_Y):
-    """The hole and the body footprint at height `y`, plus the plane transform."""
-    sec = mesh.section(plane_normal=[0, 1, 0], plane_origin=[0, y, 0])
-    planar, to_3d = sec.to_planar(normal=[0, 1, 0])
-    body = max(planar.polygons_full, key=lambda p: p.area)
+def outlines(parts, y=HOLE_Y):
+    """The hole and the body footprint at height `y`, in world X/Z.
+
+    Read piece by piece and unioned in 2D (split8.assembled_outline): the
+    quadrants booleaned into one solid tear along a seam once the hole is
+    reversed, and the hole cannot be found in that section.
+    """
+    sec = S.assembled_outline(parts, y)
+    body = max(getattr(sec, "geoms", [sec]), key=lambda p: p.area)
     ring = max(body.interiors, key=lambda r: shapely.Polygon(r).area)
-    return shapely.Polygon(ring).simplify(SIMPLIFY), body, to_3d
+    return shapely.Polygon(ring).simplify(SIMPLIFY), body
 
 
 def band_count(hole, clip):
@@ -154,7 +158,7 @@ def band_shapes(hole, body):
     return shapes, list(getattr(merged, "geoms", [merged]))
 
 
-def band_prisms(bands, bars, to_3d, top):
+def band_prisms(bands, bars, top):
     """The raised pattern as a solid: bands and bridges, merged."""
 
     def solids(shapes):
@@ -163,34 +167,17 @@ def band_prisms(bands, bars, to_3d, top):
             for part in getattr(shape, "geoms", [shape]):
                 p = trimesh.creation.extrude_polygon(part.simplify(S.FLAT_SIMPLIFY),
                                                      height=RIDGE_SINK + RIDGE_H)
-                p.apply_transform(to_3d)
-                p.apply_translation([0.0, top - RIDGE_SINK - HOLE_Y, 0.0])
+                # +90 about X sends the polygon's (x, y) to world (x, z) and
+                # extrudes along -Y, so this stands it from the top down.
+                p.apply_transform(trimesh.transformations.rotation_matrix(
+                    math.pi / 2, [1, 0, 0]))
+                p.apply_translation([0.0, top + RIDGE_H, 0.0])
                 if not p.is_watertight:
                     raise SystemExit("a ridge prism is not a closed volume")
                 out.append(p)
         return trimesh.util.concatenate(out)
 
     return trimesh.boolean.union([solids(bands), solids(bars)], engine=S.ENGINE)
-
-
-def sector_wedge(sector, span=45.0, reach=600.0, half_height=200.0):
-    """Solid covering one sector, on the planes the pieces are cut on."""
-    a = math.radians(sector * span)
-    b = math.radians((sector + 1) * span)
-    tri = shapely.Polygon([(0.0, 0.0),
-                           (reach * math.cos(a), reach * math.sin(a)),
-                           (reach * math.cos(b), reach * math.sin(b))])
-    prism = trimesh.creation.extrude_polygon(tri, height=2 * half_height)
-    # +90 about X sends the polygon's (x, y) to world (x, z) and extrudes along
-    # -Y; the -90 rotation would mirror the sector in Z.
-    prism.apply_transform(trimesh.transformations.rotation_matrix(
-        math.pi / 2, [1, 0, 0]))
-    prism.apply_translation([0.0, half_height, 0.0])
-    mid = math.radians(sector * span + span / 2)
-    probe = [reach / 2 * math.cos(mid), 0.0, reach / 2 * math.sin(mid)]
-    if not prism.contains([probe])[0]:
-        raise SystemExit(f"sector {sector} wedge does not cover its own bisector")
-    return prism
 
 
 def add_ridges(mesh, prisms, sector=None, span=45.0):
@@ -204,7 +191,7 @@ def add_ridges(mesh, prisms, sector=None, span=45.0):
     """
     stock = prisms
     if sector is not None:
-        stock = trimesh.boolean.intersection([prisms, sector_wedge(sector, span)],
+        stock = trimesh.boolean.intersection([prisms, S.sector_wedge(sector, span)],
                                              engine=S.ENGINE)
     return trimesh.boolean.union([mesh, stock], engine=S.ENGINE)
 
@@ -240,17 +227,19 @@ def report(name, mesh):
 
 
 def main():
-    solid = trimesh.boolean.union(S.load_quadrants(), engine=S.ENGINE)
-    print(f"v4 assembled: watertight={solid.is_watertight}, "
-          f"{solid.volume / 1000:.1f} cm3")
+    quads = S.load_quadrants()
+    # Kept as separate shells rather than fused, for the same reason as the
+    # outlines; ray casts and volume work the same on the concatenation.
+    solid = trimesh.util.concatenate(quads)
+    print(f"v4 assembled: {solid.volume / 1000:.1f} cm3")
 
-    hole, body, to_3d = outlines(solid)
+    hole, body = outlines(quads)
     print(f"hole outline: {len(hole.exterior.coords)} pts after {SIMPLIFY} mm simplify")
 
     bands, bars = band_shapes(hole, body)
     top = flat_top_level(solid, shapely.union_all(bands + bars))
     print(f"top is flat at y = {top:.3f} mm")
-    prisms = band_prisms(bands, bars, to_3d, top)
+    prisms = band_prisms(bands, bars, top)
     loose = prisms.split(only_watertight=False)
     print(f"raised pattern: {len(bands)} bands {RIDGE_W:.1f} mm wide at "
           f"{PERIOD:.1f} mm period, {RIDGE_H:.1f} mm tall, tied by "
@@ -261,7 +250,6 @@ def main():
     # Four pieces, on v4's own cuts at X=0 and Z=0 and carrying its own
     # connectors: the quadrants are already exactly that, so they only need the
     # ridges adding, each clipped to its own 90 degree sector.
-    quads = S.load_quadrants()
     assembled, out4 = [], []
     for qi, quad in enumerate(quads):
         quad = add_ridges(quad, prisms, qi, span=90.0)
@@ -271,7 +259,7 @@ def main():
         mid = math.radians(qi * 90 + 45)
         quad.apply_translation([S.EXPLODE * math.cos(mid), 0.0,
                                 S.EXPLODE * math.sin(mid)])
-        out4.append(quad)
+        out4.append(S.stl_sound(quad, f"Q{qi}"))
     trimesh.util.concatenate(out4).export(OUT_SPLIT4)
     print(f"wrote {OUT_SPLIT4}")
 
@@ -296,7 +284,7 @@ def main():
         mid = math.radians(si * 45 + 22.5)
         piece.apply_translation([S.EXPLODE * math.cos(mid), 0.0,
                                  S.EXPLODE * math.sin(mid)])
-        out.append(piece)
+        out.append(S.stl_sound(piece, f"S{si}"))
     trimesh.util.concatenate(out).export(OUT_SPLIT)
     print(f"wrote {OUT_SPLIT}")
 

@@ -10,11 +10,14 @@ the 8 pieces for export.
     python tools/split8.py
 """
 
+import io
 import math
 from pathlib import Path
 
+import manifold3d
 import numpy as np
 import shapely
+import shapely.affinity
 import trimesh
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -80,6 +83,36 @@ FLAT_INSET = 0.25
 HOLE_ROUND_R = 2.0
 HOLE_ROUND_STEPS = 10
 
+# The back is -Z: the skirt is squarer at the back and tapers to the front, as
+# the bowl in measurements.jpg does.  v4's teardrop hole had its wide end at the
+# front, flush with the skirt, and its narrow end at the back, where three
+# gusset ribs (230, 270, 314 degrees, ~50 mm reach) carried the flange.  It is
+# turned round: mirrored in Z, slid back until its wide end sits on the back
+# wall, and its front half stretched (scaled in Z about the widest line, so the
+# sides stay tangent there) until the tip is RIB_REACH + RIB_LAND inside the
+# front wall.  The skirt is not touched.
+REVERSE_HOLE = True
+RIB_REACH = 30.0                 # how far a support reaches in from the skirt wall
+RIB_LAND = 3.0                   # flange left past a rib tip, as v4 (3-4 mm)
+RIB_DEPTH = 27.0                 # how far down the skirt it runs; v4's 45 mm, scaled
+RIB_THICK = 9.0                  # as v4 (25.5 px in toiletcuts_v2.svg)
+# v4's ribs sat at 270 and +-44 degrees off it.  Mirrored, the side ribs would
+# land within a degree of the 45 and 135 cuts, and the slice of rib left on the
+# far side is cut loose from the wall by that joint's socket; at +-40 they are
+# clear of the cut and of the depth the joint is probed to.
+RIB_ANGLES = (50.0, 90.0, 130.0)
+RIB_SINK = 1.0                   # into the wall and the flange, for the union to weld
+SKIRT_STEP = 2.5                 # stair height of the cutter that clears the old ribs
+FILL_TOP = 9.5                   # the old hole is refilled up into the flattening slab
+FILL_OVERLAP = 2.0               # and reaches past its edge so the union welds
+# v4's own joints at 0 and 180 degrees put a flange tongue ~106 mm out, which
+# the reversed hole comes within a millimetre of; it is held JOINT_WALL off
+# their slots instead, and the dent rounded off with HOLE_SMOOTH.  The tongue at
+# 270 lies almost wholly inside the new hole, so it is removed and its slot
+# filled instead.
+JOINT_WALL = 2.0
+HOLE_SMOOTH = 5.0
+
 
 def frame(angle_deg):
     """(u, v, n) for the radial cut plane at `angle_deg`.
@@ -128,9 +161,11 @@ def load_quadrants():
             if not p.is_watertight:
                 raise SystemExit("quadrant is not watertight after the skirt trim")
     parts.sort(key=lambda p: math.degrees(math.atan2(p.centroid[2], p.centroid[0])) % 360)
+    if REVERSE_HOLE:
+        parts = reverse_hole(parts)
     if FLAT_TOP:
         level = max(p.bounds[1][1] for p in parts)
-        foot = flat_footprint(trimesh.boolean.union(parts, engine=ENGINE))
+        foot = flat_footprint(parts)
         parts = [flatten_top(p, level, foot.intersection(sector_polygon(i)))
                  for i, p in enumerate(parts)]
         for p in parts:
@@ -194,16 +229,20 @@ def xz_outline(mesh, y):
     return shapely.union_all(polys) if polys else None
 
 
-def flat_footprint(mesh):
+def flat_footprint(parts):
     """Where the flattening slab goes, as a polygon in world X/Z.
 
     The union of cross-sections taken below the flange slots and just above
     them: below, the outline is clean but slightly drafted in; above, it is
     full width.  Taken at slot height it would come back with slot-shaped holes
     and notch the new surface.
+
+    Read piece by piece (assembled_outline): the quadrants booleaned into one
+    solid tear along a seam once the hole is reversed, and the section loses
+    the hole, so the slab would fill it.
     """
     foot = shapely.union_all([o for o in
-                              (xz_outline(mesh, y) for y in FLAT_FOOTPRINT_YS)
+                              (assembled_outline(parts, y) for y in FLAT_FOOTPRINT_YS)
                               if o is not None])
     return foot.buffer(-FLAT_INSET)
 
@@ -255,6 +294,295 @@ def hole_round_cutter(hole, level, radius=HOLE_ROUND_R, steps=HOLE_ROUND_STEPS):
         p.apply_translation([0.0, level + 1.0, 0.0])
         solids.append(p)
     return trimesh.boolean.union(solids, engine=ENGINE)
+
+
+def sector_wedge(sector, span=45.0, reach=600.0, half_height=200.0):
+    """Solid covering one sector, on the planes the pieces are cut on."""
+    a = math.radians(sector * span)
+    b = math.radians((sector + 1) * span)
+    tri = shapely.Polygon([(0.0, 0.0),
+                           (reach * math.cos(a), reach * math.sin(a)),
+                           (reach * math.cos(b), reach * math.sin(b))])
+    prism = trimesh.creation.extrude_polygon(tri, height=2 * half_height)
+    # +90 about X sends the polygon's (x, y) to world (x, z) and extrudes along
+    # -Y; the -90 rotation would mirror the sector in Z.
+    prism.apply_transform(trimesh.transformations.rotation_matrix(
+        math.pi / 2, [1, 0, 0]))
+    prism.apply_translation([0.0, half_height, 0.0])
+    mid = math.radians(sector * span + span / 2)
+    probe = [reach / 2 * math.cos(mid), 0.0, reach / 2 * math.sin(mid)]
+    if not prism.contains([probe])[0]:
+        raise SystemExit(f"sector {sector} wedge does not cover its own bisector")
+    return prism
+
+
+def prism(region, y0, y1):
+    """`region`, a polygon in world X/Z, as a solid between heights y0 and y1."""
+    solids = []
+    for part in getattr(region, "geoms", [region]):
+        if part.is_empty or part.area < 0.01:
+            continue
+        p = trimesh.creation.extrude_polygon(part.simplify(FLAT_SIMPLIFY),
+                                             height=y1 - y0)
+        p.apply_transform(trimesh.transformations.rotation_matrix(
+            math.pi / 2, [1, 0, 0]))
+        p.apply_translation([0.0, y1, 0.0])
+        if not p.is_watertight:
+            raise SystemExit("a prism is not a closed volume")
+        solids.append(p)
+    if len(solids) == 1:
+        return solids[0]
+    return trimesh.boolean.union(solids, engine=ENGINE)
+
+
+def assembled_outline(parts, y):
+    """The assembled seat's section at `y`: each piece's, unioned in 2D.
+
+    Where two pieces' faces meet on a seam without sharing vertices the union
+    leaves a zero-width ring along it; those are dropped.
+    """
+    merged = shapely.union_all([o for o in (xz_outline(p, y) for p in parts)
+                                if o is not None])
+    return shapely.union_all([
+        shapely.Polygon(g.exterior, [r for r in g.interiors
+                                     if shapely.Polygon(r).area > 1.0])
+        for g in getattr(merged, "geoms", [merged])])
+
+
+def opening(parts, y):
+    """The largest hole through the assembled seat at height `y`.
+
+    A plane through a row of vertices (v4 has some at round heights, y=-10
+    among them) sections into open loops and loses part of the outline, so the
+    height is nudged a hair until it comes back closed.
+    """
+    for dy in (0.0, 0.05, -0.05, 0.1, -0.1):
+        sec = assembled_outline(parts, y + dy)
+        body = max(getattr(sec, "geoms", [sec]), key=lambda g: g.area)
+        if body.interiors:
+            return shapely.Polygon(max(body.interiors,
+                                       key=lambda r: shapely.Polygon(r).area))
+    raise SystemExit(f"no closed opening through the seat at y={y}")
+
+
+def skirt_inner(parts, y):
+    """The skirt's inner opening at `y`, without the ribs.
+
+    The opening is convex and the ribs are notches in it, so the hull is the
+    bare wall.
+    """
+    return opening(parts, y).convex_hull
+
+
+def ray_hit(region, angle, lateral=0.0):
+    """How far out along the ray at `angle` the edge of `region` is.
+
+    `lateral` shifts the ray sideways; the distance is still measured along it.
+    """
+    a = math.radians(angle)
+    u = np.array([math.cos(a), math.sin(a)])
+    start = np.array([-math.sin(a), math.cos(a)]) * lateral
+    hit = shapely.LineString([tuple(start), tuple(start + u * 1000.0)]).intersection(
+        region.exterior)
+    pts = [np.asarray(c) for g in getattr(hit, "geoms", [hit]) for c in g.coords]
+    if not pts:
+        raise SystemExit(f"nothing on the ray at {angle:.0f} degrees")
+    return min(float(p @ u) for p in pts)
+
+
+def flange_tongues(parts):
+    """v4's flange tongues, as (piece, footprint at tongue height).
+
+    A tongue is whatever a piece has outside its own sector.
+    """
+    out = []
+    for i, p in enumerate(parts):
+        stray = xz_outline(p, TONGUE_Y).difference(sector_polygon(i).buffer(0.01))
+        out += [(i, g) for g in getattr(stray, "geoms", [stray]) if g.area > 5.0]
+    return out
+
+
+def reversed_hole(parts, keep_out):
+    """v4's hole turned round, as a polygon in world X/Z."""
+    old = opening(parts, 9.0)
+    wall = skirt_inner(parts, -1.0)
+    room = wall.buffer(-FLAT_INSET)
+    hole = shapely.affinity.scale(old, 1.0, -1.0, origin=(0.0, 0.0))
+    # Slid back as far as it will go, so the wide end comes to rest on the wall.
+    for dz in np.arange(-100.0, 100.0, 0.1):
+        if room.contains(shapely.affinity.translate(hole, 0.0, dz)):
+            break
+    else:
+        raise SystemExit("the mirrored hole does not fit inside the skirt")
+    hole = shapely.affinity.translate(hole, 0.0, dz)
+    x0, z0, x1, z1 = hole.bounds
+    z_w = max(np.arange(z0 + 1.0, z1 - 1.0, 0.25),
+              key=lambda z: shapely.LineString([(x0 - 1, z), (x1 + 1, z)])
+              .intersection(hole).length)
+    # The sides are parallel on the widest line, so scaling the front half in Z
+    # about it keeps them tangent there.
+    tip = ray_hit(wall, 90.0) - RIB_REACH - RIB_LAND
+    back = hole.intersection(shapely.box(x0 - 1, z0 - 1, x1 + 1, z_w))
+    front = hole.intersection(shapely.box(x0 - 1, z_w, x1 + 1, z1 + 1))
+    front = shapely.affinity.scale(front, 1.0, (tip - z_w) / (z1 - z_w),
+                                   origin=(0.0, z_w))
+    hole = shapely.union_all([back, front]).buffer(0)
+    hole = hole.difference(keep_out).buffer(-HOLE_SMOOTH).buffer(HOLE_SMOOTH)
+    if hole.geom_type != "Polygon":
+        raise SystemExit("the reversed hole came apart")
+    if hole.difference(room).area > 1.0:
+        raise SystemExit("the reversed hole runs into the skirt")
+    return old, hole.intersection(room)
+
+
+def old_rib_cutter(parts):
+    """Everything inside the skirt below the flange, as a stepped solid.
+
+    Below the flange the only thing inside the wall is v4's ribs.  Each step
+    takes the opening at its own lower edge, where the inward-leaning wall is
+    narrowest, so the wall itself is never cut; what is left of a rib is at
+    most a step's worth of lean, about 0.3 mm.
+    """
+    solids = []
+    y = SKIRT_TRIM_Y - 1.0
+    while y < -0.5:
+        top = min(y + SKIRT_STEP, -0.5)
+        region = skirt_inner(parts, max(y, SKIRT_TRIM_Y + 0.5)).buffer(-FLAT_INSET)
+        solids.append(prism(region, y, top + 0.2))
+        y = top
+    return trimesh.boolean.union(solids, engine=ENGINE)
+
+
+def front_ribs(parts, hole):
+    """The supports under the front flange, one gusset per RIB_ANGLES.
+
+    In side view each is a concave quarter-ellipse, like v4's: RIB_REACH in
+    from the wall at the flange, running RIB_DEPTH down the skirt.  Its outer
+    edge follows the wall down, sunk RIB_SINK into it.  A rib whose reach would
+    bring it within RIB_LAND of the hole is shortened.
+    """
+    ys = np.linspace(0.0, -RIB_DEPTH, int(RIB_DEPTH) + 1)
+    walls = [skirt_inner(parts, min(y, -0.5)) for y in ys]
+    ribs = []
+    for angle in RIB_ANGLES:
+        a = math.radians(angle)
+        u = np.array([math.cos(a), 0.0, math.sin(a)])
+        v = np.array([0.0, 1.0, 0.0])
+        n = np.array([-math.sin(a), 0.0, math.cos(a)])
+        centre = [ray_hit(w, angle) for w in walls]
+        outer = [max(ray_hit(w, angle, s * RIB_THICK / 2) for s in (-1, 0, 1)) + RIB_SINK
+                 for w in walls]
+        def top(reach):
+            """The rib's footprint where it meets the flange."""
+            return shapely.Polygon([tuple(p[[0, 2]]) for p in (
+                u * (centre[0] - reach) + n * RIB_THICK / 2,
+                u * outer[0] + n * RIB_THICK / 2,
+                u * outer[0] - n * RIB_THICK / 2,
+                u * (centre[0] - reach) - n * RIB_THICK / 2)])
+
+        # Measured on the footprint rather than the centre line: where the hole
+        # edge runs across the rib at a slant, a corner gets there first.
+        reach = RIB_REACH
+        while top(reach).distance(hole) < RIB_LAND:
+            reach -= 0.25
+        if reach < RIB_REACH / 2:
+            raise SystemExit(f"rib at {angle:.0f}: only {reach:.1f} mm between wall and hole")
+        fillet = [1.0 - math.sqrt(max(0.0, 1.0 - (1.0 + y / RIB_DEPTH) ** 2)) for y in ys]
+        profile = shapely.Polygon(
+            [(outer[0], RIB_SINK)] + list(zip(outer, ys))
+            + [(c - reach * f, y) for c, f, y in reversed(list(zip(centre, fillet, ys)))]
+            + [(centre[0] - reach, RIB_SINK)])
+        if not profile.is_valid:
+            raise SystemExit(f"rib at {angle:.0f}: profile is not a simple polygon")
+        rib = trimesh.creation.extrude_polygon(profile, height=RIB_THICK)
+        rib.apply_transform(placement_transform(u, v, n, -n * RIB_THICK / 2))
+        print(f"  rib at {angle:5.1f} deg: reach {reach:.1f} mm, "
+              f"{top(reach).distance(hole):.1f} mm short of the hole")
+        ribs.append(rib)
+    return trimesh.util.concatenate(ribs)
+
+
+def reverse_hole(parts):
+    """Turn the teardrop round and move its supports to the front.
+
+    In order: v4's ribs come out, the old hole is filled back up to the
+    flange, the new hole is cut, and the new ribs go in.  The skirt is not
+    touched.
+    """
+    tongues = flange_tongues(parts)
+    # Which of v4's flange tongues the new hole swallows depends on the hole,
+    # and the hole is held off the ones that survive, so it is laid out twice.
+    _, first = reversed_hole(parts, shapely.Polygon())
+    dead = [(i, g) for i, g in tongues if g.intersection(first).area > g.area / 2]
+    kept = [g for i, g in tongues if g.intersection(first).area <= g.area / 2]
+    keep_out = shapely.union_all([g.buffer(0.5 + JOINT_WALL) for g in kept])
+    old, hole = reversed_hole(parts, keep_out)
+    print(f"hole reversed: was z {old.bounds[1]:.1f}..{old.bounds[3]:.1f}, "
+          f"{old.area / 100:.0f} cm2; now z {hole.bounds[1]:.1f}..{hole.bounds[3]:.1f}, "
+          f"{hole.area / 100:.0f} cm2; {len(dead)} of v4's tongues inside it removed")
+
+    level = max(p.bounds[1][1] for p in parts)
+    cutter = old_rib_cutter(parts)
+    through = prism(hole, -1.0, level + 5.0)
+    ribs = front_ribs(parts, hole)
+    out = []
+    for i, p in enumerate(parts):
+        sector = sector_polygon(i)
+        p = trimesh.boolean.difference([p, cutter], engine=ENGINE)
+        stubs = [g.buffer(0.3).difference(sector) for j, g in dead if j == i]
+        if stubs:
+            p = trimesh.boolean.difference(
+                [p, prism(shapely.union_all(stubs), TONGUE_Y - TONGUE_H,
+                          TONGUE_Y + TONGUE_H)], engine=ENGINE)
+        # The old hole, and the slot of any tongue that was removed.
+        fill = shapely.union_all([old.buffer(FILL_OVERLAP)]
+                                 + [g.buffer(0.8) for _, g in dead]).intersection(sector)
+        p = trimesh.boolean.union([p, prism(fill, 0.0, FILL_TOP)], engine=ENGINE)
+        p = trimesh.boolean.difference([p, through], engine=ENGINE)
+        mine = trimesh.boolean.intersection([ribs, sector_wedge(i, 90.0)], engine=ENGINE)
+        if len(mine.faces):
+            p = trimesh.boolean.union([p, mine], engine=ENGINE)
+        if not p.is_watertight:
+            raise SystemExit(f"quadrant {i} is not watertight after reversing the hole")
+        out.append(p)
+    return out
+
+
+def edges_ok(mesh):
+    """Closed, one shell, every edge used by exactly two faces."""
+    _, uses = np.unique(mesh.edges_sorted, axis=0, return_counts=True)
+    return mesh.is_watertight and mesh.euler_number == 2 and bool((uses == 2).all())
+
+
+def stl_sound(mesh, name, tol=1e-4):
+    """`mesh`, made sure to read back from an STL as the same closed solid.
+
+    STL stores float32.  Where a boolean has left a near-degenerate sliver -
+    the reversed hole leaves one on the 270 degree seam face, running from the
+    slab floor at the hole out to the rim - rounding can collapse it and merge
+    vertices that were distinct, so the file reads back with an edge shared
+    by four faces.  Such a piece goes back through manifold's simplify, which
+    collapses edges shorter than `tol` (0.1 micron) and so removes the
+    sliver; it is refused if the volume moves by more than 0.05 mm3.
+    """
+    def reload(m):
+        back = trimesh.load(io.BytesIO(m.export(file_type="stl")), file_type="stl")
+        back.merge_vertices()
+        return back
+
+    if edges_ok(reload(mesh)):
+        return mesh
+    man = manifold3d.Manifold(manifold3d.Mesh(
+        vert_properties=np.asarray(mesh.vertices, dtype=np.float32),
+        tri_verts=np.asarray(mesh.faces, dtype=np.uint32)))
+    out = man.simplify(tol).to_mesh()
+    fixed = trimesh.Trimesh(np.asarray(out.vert_properties)[:, :3], out.tri_verts)
+    change = abs(fixed.volume - mesh.volume)
+    if not edges_ok(reload(fixed)) or change > 0.05:
+        raise SystemExit(f"{name} does not survive STL's float32 and could not be repaired")
+    print(f"  ({name}: collapsed a sliver float32 would pinch, "
+          f"volume change {change:.4f} mm3)")
+    return fixed
 
 
 def spans(region, y):
@@ -429,7 +757,7 @@ def main():
         p.apply_translation([EXPLODE * math.cos(mid), 0.0, EXPLODE * math.sin(mid)])
         if not p.is_watertight:
             raise SystemExit(f"sector {si} is not watertight after the booleans")
-        out.append(p)
+        out.append(stl_sound(p, f"S{si}"))
         print(f"  S{si}: {len(p.faces):6d} faces, {p.volume / 1000:7.1f} cm3")
 
     trimesh.util.concatenate(out).export(OUT)

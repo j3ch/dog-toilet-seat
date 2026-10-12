@@ -109,7 +109,10 @@ def audit_joint(pa, pb, angle, label):
               sum(k.startswith("rect") for k, _, _ in holes))
     # v4's own joints lose their lowest peg to the skirt trim, so the count is
     # checked against the other side of the joint rather than against a fixed 5.
-    check(len(pegs) == np_ + nt and np_ >= 2 and nt == 2,
+    # With the hole reversed, its wide end runs over the inner tongue of v4's
+    # joint at the back, so split8 removes that tongue and fills its slot.
+    tongues = 1 if S.REVERSE_HOLE and label.startswith("v4") and angle == 270.0 else 2
+    check(len(pegs) == np_ + nt and np_ >= 2 and nt == tongues,
           f"{label} {angle:3.0f}: {np_} pegs + {nt} tongues "
           + str(sorted(k for k, _, _ in pegs)))
     check((nh, ns) == (np_, nt),

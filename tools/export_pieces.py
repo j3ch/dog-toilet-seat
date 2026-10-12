@@ -132,6 +132,7 @@ def main():
         tag = "Q" if len(parts) == 4 else "S"
         stem = SRC.stem.replace("_in_8", "").replace("_in_4", "")
         name = f"{stem}_{tag}{si}.stl"
+        p = S.stl_sound(p, name)
         p.export(str(OUTDIR / name))
         w, d, h = p.extents
         total += p.volume

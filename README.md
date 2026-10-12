@@ -333,3 +333,73 @@ pieces is sound: each is a single closed shell, every edge used twice, and each
 joint reads back as 2 pegs + 2 tongues at 0.5 mm clearance.
 
 `tools/check8.py` works on either split - it takes the piece count from the file.
+
+## Teardrop reversed, supports moved to the front
+
+v4's hole was a teardrop with its wide end at the front, flush with the skirt,
+and its narrow end at the back. Three gusset ribs under the flange carried the
+wide stretch of flange behind it. They sat at 230, 270 and 314 degrees, 9 mm
+thick, reaching ~50 mm in from the skirt wall and running ~45 mm down it. That
+is the wrong way round: the back is -Z (the skirt is squarer at the back and
+tapers to the front, like the bowl in `measurements.jpg`), and it is the front
+rim Lala stands on.
+
+`split8.py` now turns the hole round (`REVERSE_HOLE`) before anything else
+touches the top, so the flat top, the hole break, the ridges and the 8-way
+joints all follow it. **The skirt is not changed**: its outline at y = -1.5,
+-5, -30 and -60 mm is identical to before, so the bowl-fit table above still
+holds.
+
+- **Hole.** The hole is mirrored front to back, then slid back until its wide
+  end sits on the back wall. The front half is then stretched, scaled in Z
+  about the widest line so the sides stay tangent there, until the tip is
+  33 mm inside the front wall: rib reach plus a 3 mm land, as v4 had. The hole
+  goes from 219 x 243 mm to **219 x 264 mm**, and from 412 to 448 cm2.
+- **Supports.** v4's ribs are cut out with a stepped cutter, the same idiom as
+  the hole break. Each 2.5 mm step takes the skirt's opening at its lower edge,
+  where the inward-leaning wall is narrowest, so the wall itself is never
+  touched. Three new ribs go in at the front, at **50, 90 and 130 degrees**,
+  with the same concave quarter-ellipse profile as v4's but **30 mm reach and
+  27 mm down the skirt**. The 130 degree rib is held to 29 mm so it keeps the
+  3 mm land to the hole. The side ribs are at +-40 degrees rather than v4's
+  mirrored +-44, which would put them across the 45 and 135 degree cuts. There
+  the sliver of rib past the cut was bored loose from the wall by that joint's
+  socket.
+- **v4's own joints.** The hole's new wide end runs over the inner flange
+  tongue of v4's joint at 270 degrees (it spanned r = 114-149 mm). That tongue
+  is removed and its slot filled, so **the 270 joint now carries 2 pegs + 1
+  tongue**, and `check8.py` expects that. The joints at 0 and 180 degrees keep
+  their tongues. The reversed hole would have come within a millimetre of one
+  side's slot, so the hole is held 2 mm off it. That leaves a smoothed dent
+  3.7 mm deep and 17 mm long in one side of the hole at the seam.
+
+Two fixes to the tools came out of this:
+
+- The assembled outline (flat-top footprint, ridge bands) is now a 2D union of
+  each piece's section (`split8.assembled_outline`). Booleaning the quadrants
+  into one solid first tore along a seam with the new hole: the section lost
+  the hole, and the flattening slab filled half of it.
+- Every piece file is checked to read back from STL as the same closed solid
+  (`split8.stl_sound`). Float32 rounding pinched a near-degenerate sliver on a
+  seam face of Q1 and Q3, leaving an edge shared by four faces. Such a piece is
+  run through manifold's `simplify` at 0.1 micron, which collapses the sliver,
+  and the result is refused if the volume moves by more than 0.05 mm3. The
+  changes were 0.002-0.014 mm3.
+
+| piece | footprint mm | volume cm3 | bed contact mm2 |
+|---|---|---|---|
+| S0 | 166.8 x 167.4 | 288.1 | 8760 |
+| S1 | 180.3 x 179.9 | 367.8 | 11340 |
+| S2 | 178.5 x 178.7 | 368.2 | 11287 |
+| S3 | 161.3 x 162.1 | 265.5 | 8348 |
+| S4 | 163.0 x 163.5 | 254.7 | 7670 |
+| S5 | 161.2 x 161.6 | 283.9 | 8633 |
+| S6 | 164.3 x 164.2 | 286.9 | 8646 |
+| S7 | 166.7 x 165.8 | 255.9 | 7991 |
+
+The seat is 2375 cm3 with ridges, 81.6 mm tall. All 8 pieces fit the 200 mm
+bed. All 12 piece files are single closed shells with every edge used exactly
+twice and a first layer that is one connected region. `check8.py` passes on
+`toiletv4_sliced_in_8.stl`. On the ridged splits it fails only on the volume
+check, which does not count the ridges, and, for the 4-piece set, on bed size,
+both as before.
