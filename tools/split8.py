@@ -102,7 +102,10 @@ RIB_THICK = 9.0                  # as v4 (25.5 px in toiletcuts_v2.svg)
 # clear of the cut and of the depth the joint is probed to.
 RIB_ANGLES = (50.0, 90.0, 130.0)
 RIB_SINK = 1.0                   # into the wall and the flange, for the union to weld
-SKIRT_STEP = 2.5                 # stair height of the cutter that clears the old ribs
+LOFT_STEP = 0.5                  # the cutter that clears the old ribs follows the wall,
+LOFT_ANGLE = 0.5                 # sampled this often up (mm) and round (degrees),
+LOFT_SHY = 0.02                  # and held this far off it
+SLIT = 0.05                      # seam slits narrower than twice this are closed
 FILL_TOP = 9.5                   # the old hole is refilled up into the flattening slab
 FILL_OVERLAP = 2.0               # and reaches past its edge so the union welds
 # v4's own joints at 0 and 180 degrees put a flange tongue ~106 mm out, which
@@ -369,9 +372,12 @@ def skirt_inner(parts, y):
     """The skirt's inner opening at `y`, without the ribs.
 
     The opening is convex and the ribs are notches in it, so the hull is the
-    bare wall.
+    bare wall.  At some heights the two pieces' sections do not quite meet on
+    a seam and leave a zero-width slit running from the opening into the
+    wall; the hull would reach out to the slit's tip and the rib cutter bite
+    up to 7 mm into the wall there, so slits are closed up first.
     """
-    return opening(parts, y).convex_hull
+    return opening(parts, y).buffer(-SLIT).buffer(SLIT).convex_hull
 
 
 def ray_hit(region, angle, lateral=0.0):
@@ -435,22 +441,61 @@ def reversed_hole(parts, keep_out):
     return old, hole.intersection(room)
 
 
-def old_rib_cutter(parts):
-    """Everything inside the skirt below the flange, as a stepped solid.
+def polar(region, angles):
+    """Distance from the origin to the edge of the convex `region` along each angle."""
+    c = np.asarray(region.exterior.coords)[:-1]
+    th = np.arctan2(c[:, 1], c[:, 0])
+    order = np.argsort(th)
+    c, th = c[order], th[order]
+    d = np.column_stack([np.cos(angles), np.sin(angles)])
+    i = np.searchsorted(th, np.arctan2(d[:, 1], d[:, 0]))
+    p0, p1 = c[i - 1], c[i % len(c)]
+    e = p1 - p0
+    cross = lambda u, w: u[:, 0] * w[:, 1] - u[:, 1] * w[:, 0]
+    return cross(p0, e) / cross(d, e)
 
-    Below the flange the only thing inside the wall is v4's ribs.  Each step
-    takes the opening at its own lower edge, where the inward-leaning wall is
-    narrowest, so the wall itself is never cut; what is left of a rib is at
-    most a step's worth of lean, about 0.3 mm.
+
+def old_rib_cutter(parts):
+    """Everything inside the skirt below the flange, as a solid lofted on the wall.
+
+    Below the flange the only thing inside the wall is v4's ribs.  The bare
+    wall is the hull of the opening at each height (the ribs are notches in
+    it); it is sampled every LOFT_STEP mm up and LOFT_ANGLE degrees round,
+    held LOFT_SHY off the wall so the cut never touches it, and the rings
+    joined into one ruled solid that runs up to the flange's underside.  A
+    stack of prisms left a staircase of rib up to 0.5 mm proud, and a 0.3 mm
+    plate of each rib top under the flange.
     """
-    solids = []
-    y = SKIRT_TRIM_Y - 1.0
-    while y < -0.5:
-        top = min(y + SKIRT_STEP, -0.5)
-        region = skirt_inner(parts, max(y, SKIRT_TRIM_Y + 0.5)).buffer(-FLAT_INSET)
-        solids.append(prism(region, y, top + 0.2))
-        y = top
-    return trimesh.boolean.union(solids, engine=ENGINE)
+    angles = np.radians(np.arange(0.0, 360.0, LOFT_ANGLE))
+    ys = list(np.arange(SKIRT_TRIM_Y + 0.5, -0.1, LOFT_STEP)) + [-LOFT_SHY]
+    rings = []
+    for y in ys:
+        # A section exactly on the underside is degenerate; 0.1 mm below it
+        # the wall is 0.01 mm further in.
+        wall = skirt_inner(parts, min(y, -0.1))
+        r = polar(wall, angles) - LOFT_SHY
+        ring = shapely.Polygon(np.column_stack([r * np.cos(angles), r * np.sin(angles)]))
+        if not wall.buffer(-LOFT_SHY / 2).contains(ring):
+            raise SystemExit(f"the loft ring at y={y:.1f} reaches the wall")
+        rings.append(np.column_stack([r * np.cos(angles), np.full(len(r), y),
+                                      r * np.sin(angles)]))
+    k, m = len(rings), len(angles)
+    verts = np.vstack(rings + [[[0.0, ys[0], 0.0]], [[0.0, ys[-1], 0.0]]])
+    bottom, top = k * m, k * m + 1
+    faces = []
+    for i in range(k - 1):
+        for j in range(m):
+            a0, a1 = i * m + j, i * m + (j + 1) % m
+            b0, b1 = a0 + m, a1 + m
+            faces += [(a0, a1, b1), (a0, b1, b0)]
+    for j in range(m):
+        faces.append((bottom, (j + 1) % m, j))
+        faces.append((top, (k - 1) * m + j, (k - 1) * m + (j + 1) % m))
+    loft = trimesh.Trimesh(verts, np.array(faces), process=False)
+    trimesh.repair.fix_normals(loft)
+    if not loft.is_volume:
+        raise SystemExit("the cutter lofted on the skirt wall is not a closed volume")
+    return loft
 
 
 def front_ribs(parts, hole):

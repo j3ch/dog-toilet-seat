@@ -355,10 +355,13 @@ holds.
   about the widest line so the sides stay tangent there, until the tip is
   33 mm inside the front wall: rib reach plus a 3 mm land, as v4 had. The hole
   goes from 219 x 243 mm to **219 x 264 mm**, and from 412 to 448 cm2.
-- **Supports.** v4's ribs are cut out with a stepped cutter, the same idiom as
-  the hole break. Each 2.5 mm step takes the skirt's opening at its lower edge,
-  where the inward-leaning wall is narrowest, so the wall itself is never
-  touched. Three new ribs go in at the front, at **50, 90 and 130 degrees**,
+- **Supports.** v4's ribs are cut out with a solid lofted on the bare skirt
+  wall. The wall at each height is the hull of the opening, since the ribs are
+  notches in it. The loft samples it every 0.5 mm up and 0.5 degrees round,
+  holds 0.02 mm off it, and runs right up to the flange's underside. What is
+  left of the old ribs stands at most 0.043 mm proud of the wall. A stack of
+  2.5 mm prisms was tried first and left a staircase of rib up to 0.5 mm proud,
+  plus a 0.3 mm plate of each rib top under the flange. Three new ribs go in at the front, at **50, 90 and 130 degrees**,
   with the same concave quarter-ellipse profile as v4's but **30 mm reach and
   27 mm down the skirt**. The 130 degree rib is held to 29 mm so it keeps the
   3 mm land to the hole. The side ribs are at +-40 degrees rather than v4's
@@ -373,7 +376,20 @@ holds.
   side's slot, so the hole is held 2 mm off it. That leaves a smoothed dent
   3.7 mm deep and 17 mm long in one side of the hole at the seam.
 
-Two fixes to the tools came out of this:
+Three fixes to the tools came out of this:
+
+- At some heights the two pieces' sections do not quite meet on a seam, and
+  leave a zero-width slit running from the opening into the wall. The hull of
+  the opening reached out to the slit's tip, so the rib cutter bit up to 7 mm
+  into the wall at the 270 degree seam. Slits are now closed before the hull
+  is taken (`SLIT`). Checked every 0.25 mm up and 0.25 degrees round against
+  the previous files:
+  - the outer wall is unchanged;
+  - away from the ribs the inner wall is within 0.12 mm;
+  - the cutter goes at most 0.004 mm past the bare wall.
+
+  The 0.12 mm is a slight inward bulge v4 had at its 0 and 180 degree seams,
+  now trimmed flush.
 
 - The assembled outline (flat-top footprint, ridge bands) is now a 2D union of
   each piece's section (`split8.assembled_outline`). Booleaning the quadrants
@@ -393,11 +409,11 @@ Two fixes to the tools came out of this:
 | S2 | 178.5 x 178.7 | 368.2 | 11287 |
 | S3 | 161.3 x 162.1 | 265.5 | 8348 |
 | S4 | 163.0 x 163.5 | 254.7 | 7670 |
-| S5 | 161.2 x 161.6 | 283.9 | 8633 |
-| S6 | 164.3 x 164.2 | 286.9 | 8646 |
+| S5 | 161.2 x 161.6 | 283.6 | 8633 |
+| S6 | 164.3 x 164.2 | 286.6 | 8646 |
 | S7 | 166.7 x 165.8 | 255.9 | 7991 |
 
-The seat is 2375 cm3 with ridges, 81.6 mm tall. All 8 pieces fit the 200 mm
+The seat is 2374.7 cm3 with ridges, 81.6 mm tall. All 8 pieces fit the 200 mm
 bed. All 12 piece files are single closed shells with every edge used exactly
 twice and a first layer that is one connected region. `check8.py` passes on
 `toiletv4_sliced_in_8.stl`. On the ridged splits it fails only on the volume
