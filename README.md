@@ -389,18 +389,43 @@ and so are `toiletv4_sliced_in_8.stl`, `toiletv4_ridged_in_8.stl` and
 `toiletv4_ridged_in_4.stl`. **The quadrants need a 207-226 mm square bed, so
 they do not fit a 200 mm one.**
 
+### 40 mm off the back
+
+The seat is **40 mm shorter**, all of it taken off the back (-Z, the wide end
+of the hole). The back is cut off square (`BACK_TRIM` in `split8.py`), with
+the corners left square. The seat now runs from z = -167.3 to +219.5 mm,
+**386.8 mm long** (was 426.8), still 375.0 mm wide and 81.6 mm tall.
+
+- **Skirt.** The skirt's outside reaches 157.9 mm back, so the cut only takes
+  flange; the skirt is identical to before. That leaves 9.4 mm of flange
+  behind the skirt, and 21.7 mm between the hole and the back edge on the
+  centre line.
+- **270 degree joint.** The cut ran through the joint's remaining flange
+  tongue, which spanned r = 163-198 mm, leaving a 4 mm stub. The stub is
+  removed and what was left of its slot filled. A shorter tongue goes in its
+  place: **16 mm in a 17 mm slot**, same 4 x 5 mm section and 0.5 mm
+  clearance, at r = 147.9-164.9 mm. That keeps 2.3 mm of wall to the hole and
+  2.4 mm to the back edge. The joint carries 2 pegs + 1 tongue, as before.
+- **Ridges.** The flat top, ridges and 10 mm border follow the new outline.
+
 | piece | footprint mm | volume cm3 | bed contact mm2 | smallest square bed |
 |---|---|---|---|---|
 | Q0 | 195.6 x 225.5 | 657.1 | 20204 | 226 mm |
-| Q1 | 185.4 x 219.5 | 635.1 | 19872 | 220 mm |
-| Q2 | 191.4 x 213.3 | 539.5 | 16432 | 213 mm |
-| Q3 | 189.6 x 207.3 | 543.4 | 16626 | 207 mm |
+| Q1 | 185.4 x 219.5 | 635.1 | 19871 | 220 mm |
+| Q2 | 191.4 x 173.3 | 425.1 | 12320 | 191 mm |
+| Q3 | 189.6 x 167.3 | 427.5 | 12404 | 190 mm |
 
-The seat is 2375.1 cm3 with ridges, 81.6 mm tall. Each piece file is a single
-closed shell with every edge used exactly twice, and its first layer is one
-connected region. `check8.py` passes on joints, clearances and mating. It
-fails only on volume (the check does not count the ridges) and on the 200 mm
-bed size, both as before.
+The seat is 2144.8 cm3 with ridges. **The two back quadrants now fit a 200 mm
+bed; the two front ones still do not** (226 and 220 mm). Each piece file is a
+single closed shell with every edge used exactly twice, and its first layer is
+one connected region. `check8.py` passes on joints, clearances and mating. It
+fails only on volume (the check does not count the ridges) and on bed size for
+Q0 and Q1.
+
+`ridges.py`'s flatness check now leaves the hole's 2 mm edge break out of its
+sample and requires 99.5% of the rest flat; it measures 100.00%. Before, it
+counted the break in and passed at 98%, and the shorter top tipped that just
+under. Its comment blamed seam grooves, but every low sample was in the break.
 
 Fixes to the tools that came out of this:
 

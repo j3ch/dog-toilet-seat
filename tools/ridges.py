@@ -86,15 +86,18 @@ def band_count(hole, clip):
                int(math.ceil((reach - START) / PERIOD)) + 1)
 
 
-def flat_top_level(mesh, region, tol=0.01):
+def flat_top_level(mesh, region, hole, tol=0.01):
     """The height of the part's flat top, asserting that it really is flat.
 
     Sampled over `region`, the band footprint: the flattening slab is held just
     inside the outline, so a thin strip of the original rounded rim survives at
     the very edge, and it is the ground under the ridges that has to be flat.
+    The break along the hole edge is meant to be lower, so it is left out of
+    the sample: the 2 mm break, plus the 0.25 mm the slab is held off the hole,
+    plus half a millimetre.
     """
     top = mesh.bounds[1][1]
-    inner = region
+    inner = region.difference(hole.buffer(S.HOLE_ROUND_R + S.FLAT_INSET + 0.5))
     x0, z0, x1, z1 = inner.bounds
     gx, gz = np.meshgrid(np.arange(x0, x1, 3.0), np.arange(z0, z1, 3.0))
     pts = [p for p in np.column_stack([gx.ravel(), gz.ravel()])
@@ -106,14 +109,13 @@ def flat_top_level(mesh, region, tol=0.01):
     y = hit[hit[:, 1] > 5.0][:, 1]
     off = top - y
     share = float((off <= tol).mean())
-    # 98%, not 100%: a hairline groove (<=0.2 mm) runs down each seam where two
-    # quadrants' flattening slabs meet, and the sampling grid clips it.  The
-    # bridges cover it everywhere except the innermost 5 mm.
-    if share < 0.98:
+    # 99.5%, not 100%: a hairline groove (<=0.2 mm) can run down a seam where
+    # two quadrants' flattening slabs meet, and the sampling grid may clip it.
+    if share < 0.995:
         raise SystemExit(f"top is not flat: only {share * 100:.1f}% of {len(y)} samples "
                          f"sit at {top:.3f} mm; split8.FLAT_TOP must be on")
-    print(f"  flat over {share * 100:.2f}% of the band footprint; "
-          f"worst dip {off.max():.2f} mm, at the hole edge")
+    print(f"  flat over {share * 100:.2f}% of the band footprint, away from the "
+          f"hole's edge break; worst dip {off.max():.2f} mm")
     return top
 
 
@@ -222,7 +224,7 @@ def main():
     print(f"hole outline: {len(hole.exterior.coords)} pts after {SIMPLIFY} mm simplify")
 
     bands, bars = band_shapes(hole, body)
-    top = flat_top_level(solid, shapely.union_all(bands + bars))
+    top = flat_top_level(solid, shapely.union_all(bands + bars), hole)
     print(f"top is flat at y = {top:.3f} mm")
     prisms = band_prisms(bands, bars, top)
     loose = prisms.split(only_watertight=False)

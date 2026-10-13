@@ -101,6 +101,14 @@ FILL_OVERLAP = 2.0               # and reaches past its edge so the union welds
 JOINT_WALL = 2.0
 SLOT_FILL = 1.5
 
+# The seat is shortened by cutting BACK_TRIM off the back (-Z, the wide end of
+# the hole), square across.  The skirt's outside reaches 157.9 mm back, so the
+# cut, 167.3 mm back, only takes flange.  It runs through the one tongue left
+# on v4's joint at 270 degrees, leaving a 4 mm stub; that is removed with its
+# slot, and a shorter tongue put in its place in the 22 mm of flange left
+# between the hole and the new edge, JOINT_WALL off each.
+BACK_TRIM = 40.0
+
 
 def frame(angle_deg):
     """(u, v, n) for the radial cut plane at `angle_deg`.
@@ -151,6 +159,8 @@ def load_quadrants():
     parts.sort(key=lambda p: math.degrees(math.atan2(p.centroid[2], p.centroid[0])) % 360)
     if REVERSE_HOLE:
         parts = reverse_hole(parts)
+    if BACK_TRIM:
+        parts = trim_back(parts)
     if FLAT_TOP:
         level = max(p.bounds[1][1] for p in parts)
         foot = flat_footprint(parts)
@@ -562,6 +572,67 @@ def reverse_hole(parts):
         if not p.is_watertight:
             raise SystemExit(f"quadrant {i} is not watertight after reversing the hole")
         out.append(p)
+    return out
+
+
+def trim_back(parts):
+    """Cut BACK_TRIM off the back, and re-make the 270 degree joint's tongue."""
+    z_cut = min(p.bounds[0][2] for p in parts) + BACK_TRIM
+    skirt = assembled_outline(parts, -0.5)
+    if skirt.bounds[1] < z_cut + 1.0:
+        raise SystemExit(f"cutting the back at z={z_cut:.1f} would reach the skirt")
+    hole = opening(parts, TONGUE_Y + 0.0037)
+    keep2d = shapely.box(-1000.0, z_cut, 1000.0, 1000.0)
+    keep = trimesh.creation.box(
+        extents=[2000.0, 400.0, 2000.0],
+        transform=trimesh.transformations.translation_matrix([0.0, 0.0, z_cut + 1000.0]))
+
+    # Tongues the cut runs through: the stub comes off the piece that carries
+    # it, and what is left of its slot is filled.
+    cut_through = [(i, g) for i, g in flange_tongues(parts) if g.bounds[1] < z_cut]
+    slot_ys = (TONGUE_Y - SLOT_H / 2 - 0.5, TONGUE_Y + SLOT_H / 2 + 0.5)
+    out = []
+    for i, p in enumerate(parts):
+        sector = sector_polygon(i)
+        p = trimesh.boolean.intersection([p, keep], engine=ENGINE)
+        stubs = [g.buffer(0.3).difference(sector) for j, g in cut_through if j == i]
+        if stubs:
+            p = trimesh.boolean.difference(
+                [p, prism(shapely.union_all(stubs), TONGUE_Y - TONGUE_H, TONGUE_Y + TONGUE_H)],
+                engine=ENGINE)
+        fill = shapely.union_all([g.buffer(SLOT_FILL) for _, g in cut_through])
+        fill = fill.intersection(sector).intersection(keep2d)
+        if not fill.is_empty and fill.area > 0.01:
+            p = trimesh.boolean.union([p, prism(fill, *slot_ys)], engine=ENGINE)
+        out.append(p)
+
+    # The new tongue, on the 270 degree plane: male on the low-angle side, as
+    # v4's, reaching across into the slot.
+    angle = 270.0
+    u, v, n = frame(angle)
+    lo = max(ray_hit(hole, angle, l) for l in np.linspace(-HOLE_DEPTH, HOLE_DEPTH, 15))
+    hi = -z_cut
+    slot_l = math.floor(hi - lo - 2 * JOINT_WALL)
+    tongue_l = slot_l - 1.0
+    if tongue_l < 10.0:
+        raise SystemExit(f"only {hi - lo:.1f} mm of flange left at the back for a tongue")
+    r = (lo + hi) / 2.0
+    male, female = int(angle // 90) - 1, int(angle // 90) % 4
+    tongue = trimesh.creation.box(
+        extents=[tongue_l, TONGUE_H, PEG_L],
+        transform=placement_transform(u, v, n, r * u + TONGUE_Y * v + n * (PEG_L / 2)))
+    slot = trimesh.creation.box(
+        extents=[slot_l, SLOT_H, HOLE_DEPTH],
+        transform=placement_transform(u, v, n, r * u + TONGUE_Y * v + n * (HOLE_DEPTH / 2)))
+    out[male] = trimesh.boolean.union([out[male], tongue], engine=ENGINE)
+    out[female] = trimesh.boolean.difference([out[female], slot], engine=ENGINE)
+    for i, p in enumerate(out):
+        if not edges_ok(p):
+            raise SystemExit(f"quadrant {i} is unsound after trimming the back")
+    print(f"back trimmed {BACK_TRIM:.0f} mm, to z={z_cut:.1f}; {len(cut_through)} tongue "
+          f"cut through, replaced at 270 deg by a {tongue_l:.0f} mm tongue in a "
+          f"{slot_l:.0f} mm slot, r={r - slot_l / 2:.1f}..{r + slot_l / 2:.1f} "
+          f"(hole edge {lo:.1f}, back edge {hi:.1f})")
     return out
 
 
