@@ -345,77 +345,81 @@ tapers to the front, like the bowl in `measurements.jpg`), and it is the front
 rim Lala stands on.
 
 `split8.py` now turns the hole round (`REVERSE_HOLE`) before anything else
-touches the top, so the flat top, the hole break, the ridges and the 8-way
-joints all follow it. **The skirt is not changed**: its outline at y = -1.5,
--5, -30 and -60 mm is identical to before, so the bowl-fit table above still
-holds.
+touches the top, so the flat top, the hole break and the ridges all follow it.
+**The skirt's outside is not changed**, so the bowl-fit table above still
+holds. Checked every 0.25 mm up and 0.25 degrees round against the previous
+files, the outer wall is identical.
 
 - **Hole.** The hole is mirrored front to back, then slid back until its wide
   end sits on the back wall. The front half is then stretched, scaled in Z
   about the widest line so the sides stay tangent there, until the tip is
   33 mm inside the front wall: rib reach plus a 3 mm land, as v4 had. The hole
   goes from 219 x 243 mm to **219 x 264 mm**, and from 412 to 448 cm2.
-- **Supports.** v4's ribs are cut out with a solid lofted on the bare skirt
-  wall. The wall at each height is the hull of the opening, since the ribs are
-  notches in it. The loft samples it every 0.5 mm up and 0.5 degrees round,
-  holds 0.02 mm off it, and runs right up to the flange's underside. What is
-  left of the old ribs stands at most 0.043 mm proud of the wall. A stack of
-  2.5 mm prisms was tried first and left a staircase of rib up to 0.5 mm proud,
-  plus a 0.3 mm plate of each rib top under the flange. Three new ribs go in at the front, at **50, 90 and 130 degrees**,
-  with the same concave quarter-ellipse profile as v4's but **30 mm reach and
-  27 mm down the skirt**. The 130 degree rib is held to 29 mm so it keeps the
-  3 mm land to the hole. The side ribs are at +-40 degrees rather than v4's
-  mirrored +-44, which would put them across the 45 and 135 degree cuts. There
-  the sliver of rib past the cut was bored loose from the wall by that joint's
-  socket.
-- **v4's own joints.** The hole's new wide end runs over the inner flange
-  tongue of v4's joint at 270 degrees (it spanned r = 114-149 mm). That tongue
-  is removed and its slot filled, so **the 270 joint now carries 2 pegs + 1
-  tongue**, and `check8.py` expects that. The joints at 0 and 180 degrees keep
-  their tongues. The reversed hole would have come within a millimetre of one
-  side's slot, so the hole is held 2 mm off it. That leaves a smoothed dent
-  3.7 mm deep and 17 mm long in one side of the hole at the seam.
+- **Old supports out.** v4's ribs are cut away with a solid lofted on the
+  bare skirt wall. The wall at each height is the hull of the opening, since
+  the ribs are notches in it. The loft samples it every 0.5 mm up and 0.5
+  degrees round, holds 0.02 mm off it, and runs right up to the flange's
+  underside.
+  - What is left of the old ribs stands at most 0.043 mm proud of the wall.
+  - The cutter goes at most 0.004 mm past the wall.
+  - Away from the ribs the inner wall is within 0.12 mm of before. That
+    0.12 mm is a slight inward bulge v4 had at its 0 and 180 degree seams,
+    now trimmed flush.
+- **New supports in.** Three new ribs go in at the front, at **46, 90 and
+  134 degrees** (v4's 314, 270 and 230, mirrored). They have the same concave
+  quarter-ellipse profile as v4's but **30 mm reach and 27 mm down the
+  skirt**. The 134 degree rib is held to 28 mm so it keeps the 3 mm land to
+  the hole.
+- **v4's own joints.**
+  - **270 degrees:** the hole's new wide end runs over the inner flange tongue
+    (it spanned r = 114-149 mm). That tongue is removed and its slot filled,
+    so the joint now carries **2 pegs + 1 tongue**, and `check8.py` expects
+    that.
+  - **0 degrees:** the hole runs 1.5 mm past the inner end of the slot.
+    Rather than dent the hole, the inner tongue is shortened from 30 to
+    28.6 mm (the hole edge crosses it at a slant) and the end of its slot
+    filled. That leaves 2 mm of wall between slot and hole, and 0.45 mm
+    clearance at the tongue's end.
+  - **90 and 180 degrees:** unchanged.
 
-Three fixes to the tools came out of this:
+**The seat is no longer split into 8.** It is printed in v4's 4 quadrants, on
+v4's own cuts and connectors. The 8-way split code is gone from `split8.py`,
+and so are `toiletv4_sliced_in_8.stl`, `toiletv4_ridged_in_8.stl` and
+`pieces/`. `export_pieces.py` and `check8.py` now default to
+`toiletv4_ridged_in_4.stl`. **The quadrants need a 207-226 mm square bed, so
+they do not fit a 200 mm one.**
+
+| piece | footprint mm | volume cm3 | bed contact mm2 | smallest square bed |
+|---|---|---|---|---|
+| Q0 | 195.6 x 225.5 | 657.1 | 20204 | 226 mm |
+| Q1 | 185.4 x 219.5 | 635.1 | 19872 | 220 mm |
+| Q2 | 191.4 x 213.3 | 539.5 | 16432 | 213 mm |
+| Q3 | 189.6 x 207.3 | 543.4 | 16626 | 207 mm |
+
+The seat is 2375.1 cm3 with ridges, 81.6 mm tall. Each piece file is a single
+closed shell with every edge used exactly twice, and its first layer is one
+connected region. `check8.py` passes on joints, clearances and mating. It
+fails only on volume (the check does not count the ridges) and on the 200 mm
+bed size, both as before.
+
+Fixes to the tools that came out of this:
 
 - At some heights the two pieces' sections do not quite meet on a seam, and
   leave a zero-width slit running from the opening into the wall. The hull of
   the opening reached out to the slit's tip, so the rib cutter bit up to 7 mm
   into the wall at the 270 degree seam. Slits are now closed before the hull
-  is taken (`SLIT`). Checked every 0.25 mm up and 0.25 degrees round against
-  the previous files:
-  - the outer wall is unchanged;
-  - away from the ribs the inner wall is within 0.12 mm;
-  - the cutter goes at most 0.004 mm past the bare wall.
-
-  The 0.12 mm is a slight inward bulge v4 had at its 0 and 180 degree seams,
-  now trimmed flush.
-
+  is taken (`SLIT`).
+- A slot is 1 mm deeper than its tongue is long. Filling the end of one with
+  the tongue's outline grown by 0.8 mm stopped 0.2 mm short of the slot's
+  floor; the slot wrapped round the fill and left a tunnel through the piece.
+  The fill now reaches 1.5 mm past the tongue (`SLOT_FILL`).
 - The assembled outline (flat-top footprint, ridge bands) is now a 2D union of
   each piece's section (`split8.assembled_outline`). Booleaning the quadrants
   into one solid first tore along a seam with the new hole: the section lost
   the hole, and the flattening slab filled half of it.
 - Every piece file is checked to read back from STL as the same closed solid
-  (`split8.stl_sound`). Float32 rounding pinched a near-degenerate sliver on a
-  seam face of Q1 and Q3, leaving an edge shared by four faces. Such a piece is
-  run through manifold's `simplify` at 0.1 micron, which collapses the sliver,
-  and the result is refused if the volume moves by more than 0.05 mm3. The
-  changes were 0.002-0.014 mm3.
-
-| piece | footprint mm | volume cm3 | bed contact mm2 |
-|---|---|---|---|
-| S0 | 166.8 x 167.4 | 288.1 | 8760 |
-| S1 | 180.3 x 179.9 | 367.8 | 11340 |
-| S2 | 178.5 x 178.7 | 368.2 | 11287 |
-| S3 | 161.3 x 162.1 | 265.5 | 8348 |
-| S4 | 163.0 x 163.5 | 254.7 | 7670 |
-| S5 | 161.2 x 161.6 | 283.6 | 8633 |
-| S6 | 164.3 x 164.2 | 286.6 | 8646 |
-| S7 | 166.7 x 165.8 | 255.9 | 7991 |
-
-The seat is 2374.7 cm3 with ridges, 81.6 mm tall. All 8 pieces fit the 200 mm
-bed. All 12 piece files are single closed shells with every edge used exactly
-twice and a first layer that is one connected region. `check8.py` passes on
-`toiletv4_sliced_in_8.stl`. On the ridged splits it fails only on the volume
-check, which does not count the ridges, and, for the 4-piece set, on bed size,
-both as before.
+  (`split8.stl_sound`). Float32 rounding can pinch a near-degenerate sliver on
+  a seam face, leaving an edge shared by four faces. Such a piece is run
+  through manifold's `simplify` at 0.1 micron, which collapses the sliver, and
+  the result is refused if the volume moves by more than 0.05 mm3. The changes
+  were under 0.01 mm3.

@@ -31,7 +31,6 @@ import split8 as S
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT_WHOLE = str(ROOT / "toiletv4_ridged.stl")
-OUT_SPLIT = str(ROOT / "toiletv4_ridged_in_8.stl")
 OUT_SPLIT4 = str(ROOT / "toiletv4_ridged_in_4.stl")
 
 # --- ridge pattern ---------------------------------------------------------
@@ -48,11 +47,11 @@ RIDGE_SINK = 1.0    # how far the ridge stock reaches into the part below the to
 
 # Laid on the bed the concentric bands are ~25 unconnected ribbons, 2.5 mm wide
 # and up to 250 mm long, each free to curl at its ends - which is what lifted
-# the first print.  A radial bar across them ties them into one network.  The
-# bars sit on the cut planes, where they fall on a seam rather than in the
-# middle of a face: the four 4-piece borders, plus the four diagonals, because
-# the outermost bands exist only in the corners and never reach a 4-piece
-# border - with only those four, 12373 mm2 stayed loose in 56 pieces.
+# the first print.  A radial bar across them ties them into one network.  Four
+# sit on the cut planes, where they fall on a seam rather than in the middle of
+# a face; four more run out to the corners, because the outermost bands exist
+# only there and never reach a cut plane - with only the first four, 12373 mm2
+# stayed loose in 56 pieces.
 BRIDGE_W = 10.0
 BRIDGE_ANGLES = (0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0)
 # A plain band right round the outer edge, no ridges in it, closing the pattern
@@ -196,20 +195,6 @@ def add_ridges(mesh, prisms, sector=None, span=45.0):
     return trimesh.boolean.union([mesh, stock], engine=S.ENGINE)
 
 
-def load_pieces():
-    """The 8 split pieces, un-exploded, ordered by sector."""
-    mesh = trimesh.load(S.OUT)
-    mesh.merge_vertices()
-    parts = [p for p in mesh.split(only_watertight=False) if p.volume > 1.0]
-    for p in parts:
-        a = math.degrees(math.atan2(p.centroid[2], p.centroid[0])) % 360
-        mid = math.radians(int(a // 45) * 45 + 22.5)
-        p.apply_translation([-S.EXPLODE * math.cos(mid), 0.0,
-                             -S.EXPLODE * math.sin(mid)])
-    parts.sort(key=lambda p: math.degrees(math.atan2(p.centroid[2], p.centroid[0])) % 360)
-    return parts
-
-
 def report(name, mesh):
     """Print the shell breakdown and return the count of loose ridge fragments.
 
@@ -274,19 +259,6 @@ def main():
     whole.export(OUT_WHOLE)
     print(f"wrote {OUT_WHOLE}")
 
-    out = []
-    for si, piece in enumerate(load_pieces()):
-        piece = add_ridges(piece, prisms, si)
-        if report(f"S{si}", piece):
-            raise SystemExit(f"sector {si} has loose ridge fragments")
-        if not piece.is_watertight:
-            raise SystemExit(f"sector {si} is not watertight after adding ridges")
-        mid = math.radians(si * 45 + 22.5)
-        piece.apply_translation([S.EXPLODE * math.cos(mid), 0.0,
-                                 S.EXPLODE * math.sin(mid)])
-        out.append(S.stl_sound(piece, f"S{si}"))
-    trimesh.util.concatenate(out).export(OUT_SPLIT)
-    print(f"wrote {OUT_SPLIT}")
 
 
 if __name__ == "__main__":

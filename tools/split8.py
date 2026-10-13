@@ -1,13 +1,14 @@
-"""Re-split the v4 seat from 4 printable pieces into 8.
+"""The v4 seat, remodelled: the geometry every output is built from.
 
 toiletv4_sliced.stl holds the seat already cut into quadrants by the planes
-X=0 and Z=0, exported exploded 30 mm outward.  This reassembles it, adds a
-radial cut through each quadrant at 45/135/225/315 degrees, and rebuilds on the
-new faces the same 5-connector joint the existing cuts use -- 3 round pegs down
-the skirt and 2 flat tongues in the flange, 0.5 mm clearance -- then re-explodes
-the 8 pieces for export.
+X=0 and Z=0, exported exploded 30 mm outward, with v4's own joints (pegs down
+the skirt, tongues in the flange, 0.5 mm clearance).  load_quadrants()
+reassembles it, trims the skirt, turns the teardrop hole round and moves its
+supports to the front, flattens the top and breaks the hole edge.  ridges.py
+adds the ridges and writes the files.
 
-    python tools/split8.py
+The seat used to be re-split into 8 smaller pieces here; it no longer is - it
+is printed in v4's 4 quadrants.
 """
 
 import io
@@ -22,7 +23,6 @@ import trimesh
 
 ROOT = Path(__file__).resolve().parent.parent
 SRC = str(ROOT / "toiletv4_sliced.stl")
-OUT = str(ROOT / "toiletv4_sliced_in_8.stl")
 ENGINE = "manifold"
 
 # --- joint geometry, measured off the existing v4 cut faces -----------------
@@ -31,19 +31,8 @@ HOLE_D, HOLE_DEPTH = 6.0, 7.0    # female socket
 TONGUE_L, TONGUE_H = 35.0, 4.0   # male flange tongue
 SLOT_L, SLOT_H = 36.0, 5.0       # female flange slot
 TONGUE_Y = 6.0                   # tongue mid-height (spans y = 4..8)
-PEG_YS = (-22.0, -45.0, -60.0)   # nominal peg heights, as v4's top two plus one
-PEG_Y_SEARCH = 6.0               # how far a peg may be nudged to find sound wall
 SECTIONS = 24                    # facets per peg, matching v4
 
-# v4's own sockets leave 1.5-2.0 mm of wall.  The diagonal cuts meet the ~10.5 mm
-# skirt obliquely, so the bore drifts across the wall as it goes in and a little
-# less is available; 1.0 mm is still 2-3 perimeters.  Actual values are printed.
-MIN_WALL = 1.0
-TONGUE_GAP = 13.0                # material between the two tongues, as v4
-BACKING = 2.0                    # male material required behind a peg root
-# Depths the cross-section is taken at, on each side of the cut.
-MALE_PROBES = (-0.1, -1.0, -BACKING)
-FEMALE_PROBES = (0.1, 1.5, 3.0, 4.5, 6.0, 7.0)
 EXPLODE = 40.0                   # radial explode distance for the export
 
 # The bowl this is for takes at most 70 mm of skirt; v4's is 80 mm.  The lowest
@@ -96,11 +85,7 @@ RIB_REACH = 30.0                 # how far a support reaches in from the skirt w
 RIB_LAND = 3.0                   # flange left past a rib tip, as v4 (3-4 mm)
 RIB_DEPTH = 27.0                 # how far down the skirt it runs; v4's 45 mm, scaled
 RIB_THICK = 9.0                  # as v4 (25.5 px in toiletcuts_v2.svg)
-# v4's ribs sat at 270 and +-44 degrees off it.  Mirrored, the side ribs would
-# land within a degree of the 45 and 135 cuts, and the slice of rib left on the
-# far side is cut loose from the wall by that joint's socket; at +-40 they are
-# clear of the cut and of the depth the joint is probed to.
-RIB_ANGLES = (50.0, 90.0, 130.0)
+RIB_ANGLES = (46.0, 90.0, 134.0)     # v4's 314, 270 and 230, mirrored to the front
 RIB_SINK = 1.0                   # into the wall and the flange, for the union to weld
 LOFT_STEP = 0.5                  # the cutter that clears the old ribs follows the wall,
 LOFT_ANGLE = 0.5                 # sampled this often up (mm) and round (degrees),
@@ -108,13 +93,13 @@ LOFT_SHY = 0.02                  # and held this far off it
 SLIT = 0.05                      # seam slits narrower than twice this are closed
 FILL_TOP = 9.5                   # the old hole is refilled up into the flattening slab
 FILL_OVERLAP = 2.0               # and reaches past its edge so the union welds
-# v4's own joints at 0 and 180 degrees put a flange tongue ~106 mm out, which
-# the reversed hole comes within a millimetre of; it is held JOINT_WALL off
-# their slots instead, and the dent rounded off with HOLE_SMOOTH.  The tongue at
-# 270 lies almost wholly inside the new hole, so it is removed and its slot
-# filled instead.
+# v4's own joint at 0 degrees has a flange tongue starting ~106 mm out, which
+# the reversed hole runs 1.5 mm past the end of.  Rather than dent the hole,
+# the tongue is shortened and the end of its slot filled, so the slot keeps
+# JOINT_WALL of material between it and the hole.  The tongue at 270 lies
+# almost wholly inside the new hole, so it is removed and its slot filled.
 JOINT_WALL = 2.0
-HOLE_SMOOTH = 5.0
+SLOT_FILL = 1.5
 
 
 def frame(angle_deg):
@@ -188,30 +173,6 @@ def load_quadrants():
                 if not p.is_watertight:
                     raise SystemExit("quadrant is not watertight after rounding")
     return parts
-
-
-def profile(mesh, angle, offset):
-    """Cross-section of `mesh` at `offset` from the cut plane, in (r, y).
-
-    Taken as an exact section polygon rather than by sampling `contains`: once
-    the skirt trim adds a cap face, ray casting misclassifies enough points to
-    make the measured wall jump around by several mm between adjacent heights.
-    """
-    u, v, n = frame(angle)
-    sec = mesh.section(plane_normal=n, plane_origin=n * offset)
-    if sec is None:
-        return None
-    planar, to_3d = sec.to_planar(normal=n)
-
-    def conv(coords):
-        a = np.asarray(coords)
-        w = np.column_stack([a[:, 0], a[:, 1], np.zeros(len(a)), np.ones(len(a))]) @ to_3d.T
-        return np.column_stack([w[:, :3] @ u, w[:, :3] @ v])
-
-    polys = [shapely.Polygon(conv(p.exterior.coords),
-                             [conv(r.coords) for r in p.interiors])
-             for p in planar.polygons_full]
-    return shapely.union_all(polys) if polys else None
 
 
 def xz_outline(mesh, y):
@@ -408,7 +369,7 @@ def flange_tongues(parts):
     return out
 
 
-def reversed_hole(parts, keep_out):
+def reversed_hole(parts):
     """v4's hole turned round, as a polygon in world X/Z."""
     old = opening(parts, 9.0)
     wall = skirt_inner(parts, -1.0)
@@ -433,7 +394,6 @@ def reversed_hole(parts, keep_out):
     front = shapely.affinity.scale(front, 1.0, (tip - z_w) / (z1 - z_w),
                                    origin=(0.0, z_w))
     hole = shapely.union_all([back, front]).buffer(0)
-    hole = hole.difference(keep_out).buffer(-HOLE_SMOOTH).buffer(HOLE_SMOOTH)
     if hole.geom_type != "Polygon":
         raise SystemExit("the reversed hole came apart")
     if hole.difference(room).area > 1.0:
@@ -554,14 +514,18 @@ def reverse_hole(parts):
     flange, the new hole is cut, and the new ribs go in.  The skirt is not
     touched.
     """
+    old, hole = reversed_hole(parts)
     tongues = flange_tongues(parts)
-    # Which of v4's flange tongues the new hole swallows depends on the hole,
-    # and the hole is held off the ones that survive, so it is laid out twice.
-    _, first = reversed_hole(parts, shapely.Polygon())
-    dead = [(i, g) for i, g in tongues if g.intersection(first).area > g.area / 2]
-    kept = [g for i, g in tongues if g.intersection(first).area <= g.area / 2]
-    keep_out = shapely.union_all([g.buffer(0.5 + JOINT_WALL) for g in kept])
-    old, hole = reversed_hole(parts, keep_out)
+    dead = [(i, g) for i, g in tongues if g.intersection(hole).area > g.area / 2]
+    # A surviving tongue whose slot comes within JOINT_WALL of the hole loses
+    # its inner end, and the slot is filled to match, 0.5 mm short of it.
+    near = [(i, g) for i, g in tongues if (i, g) not in dead
+            and g.distance(hole) < JOINT_WALL + 0.5]
+    for i, g in near:
+        cut = g.intersection(hole.buffer(JOINT_WALL + 0.5))
+        width = min(g.bounds[2] - g.bounds[0], g.bounds[3] - g.bounds[1])
+        print(f"  tongue at {math.degrees(math.atan2(g.centroid.y, g.centroid.x)) % 360:.0f} deg "
+              f"shortened by {cut.area / width:.1f} mm to keep its slot off the hole")
     print(f"hole reversed: was z {old.bounds[1]:.1f}..{old.bounds[3]:.1f}, "
           f"{old.area / 100:.0f} cm2; now z {hole.bounds[1]:.1f}..{hole.bounds[3]:.1f}, "
           f"{hole.area / 100:.0f} cm2; {len(dead)} of v4's tongues inside it removed")
@@ -574,14 +538,22 @@ def reverse_hole(parts):
     for i, p in enumerate(parts):
         sector = sector_polygon(i)
         p = trimesh.boolean.difference([p, cutter], engine=ENGINE)
-        stubs = [g.buffer(0.3).difference(sector) for j, g in dead if j == i]
+        stubs = ([g.buffer(0.3).difference(sector) for j, g in dead if j == i]
+                 + [g.buffer(0.3).intersection(hole.buffer(JOINT_WALL + 0.5))
+                    .difference(sector) for j, g in near if j == i])
         if stubs:
             p = trimesh.boolean.difference(
                 [p, prism(shapely.union_all(stubs), TONGUE_Y - TONGUE_H,
                           TONGUE_Y + TONGUE_H)], engine=ENGINE)
-        # The old hole, and the slot of any tongue that was removed.
+        # The old hole, the slot of any tongue that was removed, and the inner
+        # end of any slot whose tongue was shortened.
+        # A slot is 1 mm deeper than its tongue is long, so the fill reaches
+        # SLOT_FILL past the tongue to meet the slot's floor; short of it, the
+        # slot wraps round the fill and leaves a tunnel through the piece.
         fill = shapely.union_all([old.buffer(FILL_OVERLAP)]
-                                 + [g.buffer(0.8) for _, g in dead]).intersection(sector)
+                                 + [g.buffer(SLOT_FILL) for _, g in dead]
+                                 + [g.buffer(SLOT_FILL).intersection(hole.buffer(JOINT_WALL))
+                                    for _, g in near]).intersection(sector)
         p = trimesh.boolean.union([p, prism(fill, 0.0, FILL_TOP)], engine=ENGINE)
         p = trimesh.boolean.difference([p, through], engine=ENGINE)
         mine = trimesh.boolean.intersection([ribs, sector_wedge(i, 90.0)], engine=ENGINE)
@@ -628,186 +600,3 @@ def stl_sound(mesh, name, tol=1e-4):
     print(f"  ({name}: collapsed a sliver float32 would pinch, "
           f"volume change {change:.4f} mm3)")
     return fixed
-
-
-def spans(region, y):
-    """Radial intervals of material at height `y`."""
-    cut = shapely.LineString([(-1e4, y), (1e4, y)]).intersection(region)
-    out = []
-    for g in getattr(cut, "geoms", [cut]):
-        if g.is_empty or g.geom_type != "LineString":
-            continue
-        xs = [c[0] for c in g.coords]
-        out.append((min(xs), max(xs)))
-    return out
-
-
-def common_interval(regions, y):
-    """Radial band of material shared by every one of these cross-sections."""
-    lo, hi = -np.inf, np.inf
-    for region in regions:
-        cand = spans(region, y)
-        if not cand:
-            return None
-        a, b = max(cand, key=lambda sp: sp[1] - sp[0])
-        lo, hi = max(lo, a), min(hi, b)
-    return (lo, hi) if hi > lo else None
-
-
-def centre_range(male, female, y, half_male, half_female):
-    """Radial positions where a connector of this width fits both halves.
-
-    The male peg has to sit inside the cut face (and a little material behind
-    it); the female socket has to stay buried over its whole depth, which is the
-    binding constraint - the wall curves away from the cut as it runs on.
-    """
-    face = common_interval(male, y)
-    sock = common_interval(female, y)
-    if face is None or sock is None:
-        return None
-    lo = max(face[0] + half_male, sock[0] + half_female)
-    hi = min(face[1] - half_male, sock[1] - half_female)
-    return (lo, hi) if hi >= lo else None
-
-
-def footprint(r, y, half_len, half_h, round_):
-    if round_:
-        return shapely.Point(r, y).buffer(half_len, quad_segs=SECTIONS // 2)
-    return shapely.box(r - half_len, y - half_h, r + half_len, y + half_h)
-
-
-def joint_features(male, female, angle):
-    """Peg and tongue placements for the new cut at `angle`.
-
-    Positions are measured from the material actually present rather than
-    hard-coded, so each connector stays centred in its wall.
-    """
-    feats = []
-
-    for target in PEG_YS:
-        # The wall thins and drifts differently around the ring, so take the
-        # height near the nominal one that leaves the most material.
-        best = None
-        for dy in np.arange(-PEG_Y_SEARCH, PEG_Y_SEARCH + 0.5, 1.0):
-            y = target + dy
-            if y - HOLE_D / 2 < SKIRT_TRIM_Y + 1.0 or y + HOLE_D / 2 > -1.0:
-                continue
-            rng = centre_range(male, female, y,
-                               PEG_D / 2 + MIN_WALL, HOLE_D / 2 + MIN_WALL)
-            if rng is None:
-                continue
-            lo, hi = rng
-            wall = (hi - lo) / 2.0 + MIN_WALL
-            if best is None or wall > best[0]:
-                best = (wall, (lo + hi) / 2.0, y)
-        if best is None:
-            raise SystemExit(f"cut {angle:.0f}: no height within {PEG_Y_SEARCH:.0f} mm "
-                             f"of y={target:.0f} where the skirt can hold a peg with "
-                             f"{MIN_WALL} mm wall")
-        feats.append(("peg", best[1], best[2], best[0]))
-
-    rng = centre_range(male, female, TONGUE_Y,
-                       TONGUE_L / 2 + MIN_WALL, SLOT_L / 2 + MIN_WALL)
-    if rng is None:
-        raise SystemExit(f"cut {angle:.0f}: flange cannot hold a tongue")
-    lo, hi = rng
-    # Two tongues, spread across whatever span the flange gives so the wide
-    # corner flanges are held near both edges rather than only in the middle,
-    # but never closer than v4's own slot spacing.
-    separation = min(hi - lo, max(SLOT_L + TONGUE_GAP, (hi - lo) * 0.6))
-    if hi - lo < SLOT_L + TONGUE_GAP:
-        raise SystemExit(f"cut {angle:.0f}: flange has room for one tongue, not two "
-                         f"(usable span {hi - lo:.1f} mm, "
-                         f"need {SLOT_L + TONGUE_GAP:.1f})")
-    mid = (lo + hi) / 2.0
-    for r in (mid - separation / 2.0, mid + separation / 2.0):
-        feats.append(("tongue", r, TONGUE_Y, (hi - lo - separation) / 2.0 + MIN_WALL))
-    return feats
-
-
-def verify_joint(male, female, angle, feats):
-    """Assert every connector is fully buried over its whole depth."""
-    for kind, r, y, _ in feats:
-        rnd = kind == "peg"
-        peg = footprint(r, y, *((PEG_D / 2, PEG_D / 2) if rnd
-                                else (TONGUE_L / 2, TONGUE_H / 2)), rnd)
-        sock = footprint(r, y, *((HOLE_D / 2, HOLE_D / 2) if rnd
-                                 else (SLOT_L / 2, SLOT_H / 2)), rnd)
-        for region, shape, side in ((male, peg, "male root"),
-                                    (female, sock, "female socket")):
-            for i, cross in enumerate(region):
-                if not cross.contains(shape):
-                    raise SystemExit(
-                        f"cut {angle:.0f} {kind} r={r:.1f} y={y:.0f} ({side}): "
-                        f"breaks through at probe {i}")
-
-
-def connector_solids(angle, feats, male):
-    """Peg solids (male=True) or socket solids (male=False) for one joint.
-
-    Both grow from the plane in the +n direction: the pegs reach across into the
-    neighbour's space, the sockets bore into the female body.
-    """
-    u, v, n = frame(angle)
-    out = []
-    for kind, r, y, _ in feats:
-        if kind == "peg":
-            d, h = (PEG_D, PEG_L) if male else (HOLE_D, HOLE_DEPTH)
-            out.append(trimesh.creation.cylinder(
-                radius=d / 2, height=h, sections=SECTIONS,
-                transform=placement_transform(u, v, n, r * u + y * v + n * (h / 2))))
-        else:
-            le, hi, h = ((TONGUE_L, TONGUE_H, PEG_L) if male
-                         else (SLOT_L, SLOT_H, HOLE_DEPTH))
-            out.append(trimesh.creation.box(
-                extents=[le, hi, h],
-                transform=placement_transform(u, v, n, r * u + y * v + n * (h / 2))))
-    return out
-
-
-def main():
-    quads = load_quadrants()
-    print(f"loaded 4 quadrants, {sum(q.volume for q in quads) / 1000:.1f} cm3 total")
-
-    pieces = {}
-    for qi, quad in enumerate(quads):
-        angle = qi * 90 + 45.0          # bisector of this quadrant = the new cut
-        _, _, n = frame(angle)
-        high = trimesh.intersections.slice_mesh_plane(quad, n, [0, 0, 0], cap=True)
-        low = trimesh.intersections.slice_mesh_plane(quad, -n, [0, 0, 0], cap=True)
-        for half, name in ((low, "low"), (high, "high")):
-            if not half.is_watertight:
-                raise SystemExit(f"cut {angle:.0f}: {name} half is not watertight")
-
-        male = [profile(low, angle, d) for d in MALE_PROBES]
-        female = [profile(high, angle, d) for d in FEMALE_PROBES]
-        if any(x is None for x in male + female):
-            raise SystemExit(f"cut {angle:.0f}: empty cross-section")
-        feats = joint_features(male, female, angle)
-        verify_joint(male, female, angle, feats)
-        print(f"cut {angle:5.0f} deg  " + "  ".join(
-            f"{k}(r={r:.1f},y={y:.0f},wall>={w:.2f})" for k, r, y, w in feats))
-
-        # lower-angle side is male, higher-angle side is female
-        low = trimesh.boolean.union([low] + connector_solids(angle, feats, True),
-                                    engine=ENGINE)
-        high = trimesh.boolean.difference([high] + connector_solids(angle, feats, False),
-                                          engine=ENGINE)
-        pieces[2 * qi], pieces[2 * qi + 1] = low, high
-
-    out = []
-    for si in sorted(pieces):
-        p = pieces[si]
-        mid = math.radians(si * 45 + 22.5)
-        p.apply_translation([EXPLODE * math.cos(mid), 0.0, EXPLODE * math.sin(mid)])
-        if not p.is_watertight:
-            raise SystemExit(f"sector {si} is not watertight after the booleans")
-        out.append(stl_sound(p, f"S{si}"))
-        print(f"  S{si}: {len(p.faces):6d} faces, {p.volume / 1000:7.1f} cm3")
-
-    trimesh.util.concatenate(out).export(OUT)
-    print(f"wrote {OUT}")
-
-
-if __name__ == "__main__":
-    main()

@@ -1,10 +1,10 @@
-"""Verify toiletv4_sliced_in_8.stl against the v4 original.
+"""Verify a split seat file against the v4 original.
 
 Checks mesh integrity, volume conservation, that every joint carries the same
 5 connectors at the same clearance v4 uses, that each piece fits the bed, and
 that adjacent pieces actually mate without interference.
 
-    python tools/check8.py [bed_mm]
+    python tools/check8.py [split.stl [assembled.stl [bed_mm]]]
 """
 
 import math
@@ -23,7 +23,7 @@ SPLIT = ARGV[0] if len(ARGV) > 0 else None
 WHOLE = ARGV[1] if len(ARGV) > 1 else None
 BED = float(ARGV[2]) if len(ARGV) > 2 else 200.0
 V4_CUTS = (0.0, 90.0, 180.0, 270.0)     # the planes v4 was already cut on
-PIECES = 8                              # set from the file being checked
+PIECES = 4                              # set from the file being checked
 SECTOR = 45.0
 
 fails = []
@@ -38,7 +38,7 @@ def check(ok, msg):
 def load_sectors():
     """The pieces, un-exploded back into assembled position."""
     global PIECES, SECTOR
-    mesh = trimesh.load(SPLIT or S.OUT)
+    mesh = trimesh.load(SPLIT or str(Path(S.ROOT) / "toiletv4_ridged_in_4.stl"))
     mesh.merge_vertices()
     parts = [p for p in mesh.split(only_watertight=False) if p.volume > 1.0]
     PIECES = len(parts)

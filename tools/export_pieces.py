@@ -1,6 +1,6 @@
 """Write each piece of a split seat to its own STL, ready to load in a slicer.
 
-The split files hold all 8 pieces in one mesh, in assembled-and-exploded
+The split file holds the 4 pieces in one mesh, in assembled-and-exploded
 positions with Y up.  Slicers want one solid per file, Z up, sitting on the bed.
 Each piece is converted to Z up, turned about the vertical axis to its smallest
 square footprint, centred on the origin and dropped onto Z=0.
@@ -27,8 +27,8 @@ ROOT = Path(__file__).resolve().parent.parent
 ARGV = [a for a in sys.argv[1:] if not a.startswith("--")]
 FLIP = "--upright" not in sys.argv[1:]
 LEVEL = FLIP and "--no-level" not in sys.argv[1:]
-SRC = Path(ARGV[0]) if len(ARGV) > 0 else ROOT / "toiletv4_ridged_in_8.stl"
-OUTDIR = Path(ARGV[1]) if len(ARGV) > 1 else ROOT / "pieces"
+SRC = Path(ARGV[0]) if len(ARGV) > 0 else ROOT / "toiletv4_ridged_in_4.stl"
+OUTDIR = Path(ARGV[1]) if len(ARGV) > 1 else ROOT / "4pieces"
 
 
 def best_spin(mesh):
